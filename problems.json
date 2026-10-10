@@ -1,0 +1,19 @@
+[
+  {"id":"two-sum","title":"Two Sum","difficulty":"easy","tags":["array","hash-map"],
+   "statement":"Given a list of ints nums and an int target, return the indices of the two numbers that add up to target. Exactly one solution exists.",
+   "entry":"two_sum","starter":"def two_sum(nums, target):\n    pass\n",
+   "tests":[{"args":[[2,7,11,15],9],"expected":[0,1],"unordered":true},
+            {"args":[[3,2,4],6],"expected":[1,2],"unordered":true},
+            {"args":[[3,3],6],"expected":[0,1],"unordered":true}]},
+  {"id":"valid-palindrome","title":"Valid Palindrome","difficulty":"easy","tags":["two-pointers","string"],
+   "statement":"Return True if s reads the same forwards and backwards after lowercasing and keeping only alphanumeric characters.",
+   "entry":"is_palindrome","starter":"def is_palindrome(s):\n    pass\n",
+   "tests":[{"args":["A man, a plan, a canal: Panama"],"expected":true},
+            {"args":["race a car"],"expected":false},
+            {"args":[" "],"expected":true}]},
+  {"id":"longest-unique-substring","title":"Longest Substring Without Repeats","difficulty":"medium","tags":["sliding-window","string","hash-map"],
+   "statement":"Return the length of the longest substring of s with no repeating characters.",
+   "entry":"length_of_longest_substring","starter":"def length_of_longest_substring(s):\n    pass\n",
+   "tests":[{"args":["abcabcbb"],"expected":3},{"args":["bbbbb"],"expected":1},
+            {"args":["pwwkew"],"expected":3},{"args":[""],"expected":0}]}
+]

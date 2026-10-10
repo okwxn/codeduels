@@ -1,0 +1,12 @@
+[tools]
+python = "3.14"
+uv = "latest"
+flyctl = "latest"
+
+[tasks.dev]
+description = "run locally with reload"
+run = "uv run uvicorn main:app --reload --port 3000"
+
+[tasks.deploy]
+description = "ship to fly"
+run = "fly deploy"
