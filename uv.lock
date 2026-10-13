@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.14"
 
 [[package]]
-name = "algo1v1"
+name = "algowars"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
