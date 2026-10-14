@@ -36,7 +36,7 @@ def build(d: Path, n_diff=3000):
     tests = list(meta.pop("fixed_tests", []))
     for s in SIZES:
         a = gen(rng, s)
-        t = {"args": a, "expected": ref(*copy.deepcopy(a))}
+        t = {"args": a, "expected": ref(*copy.deepcopy(a)), "n": s}
         if unordered: t["unordered"] = True
         if chk: assert chk(a, t["expected"], None), f"{meta['id']}: ref fails its own checker on {a}"
         tests.append(t)

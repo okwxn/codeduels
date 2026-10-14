@@ -10,19 +10,24 @@ button{cursor:pointer;background:#2d6cdf;border-color:#2d6cdf;transition:transfo
 button:hover{filter:brightness(1.15)}
 button:active{transform:scale(.96);filter:brightness(.8)}
 button[aria-busy=true]{opacity:.6;cursor:progress}
+[aria-disabled=true]{opacity:.5;cursor:not-allowed}
 [role=tab]{background:#333;border-color:#555}
 [role=tab][aria-selected=true]{background:#eee;color:#111}
 :focus-visible{outline:3px solid #ffd54a;outline-offset:2px}
 pre{white-space:pre-wrap;background:#1a1a1a;padding:10px;border-radius:6px}
 #ed{height:360px;border:1px solid #333}
-#log{min-height:1.4em;color:#ffd54a;margin-bottom:8px}
+.sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+#msg{color:#ff8a80;min-height:1.4em}
 table{border-collapse:collapse;width:100%;margin:8px 0}
 td,th{padding:4px 8px;border-bottom:1px solid #333;text-align:left}
+.rk{font-weight:700;background:#1d2a44}
+#legend,#tl{color:#aaa;font-size:13px}
 fieldset{border:1px solid #444;border-radius:6px;margin:6px 0}
 .hide{display:none}
 </style>
 <h1><a href="/">CodeDuels</a></h1>
-<div id=log role=log aria-live=polite></div>
+<div id=log role=log aria-live=polite class=sr></div>
+<p id=msg role=alert></p>
 
 <div id=home class=hide>
   <p>No signup. Create a match, send the link.</p>
@@ -37,7 +42,7 @@ fieldset{border:1px solid #444;border-radius:6px;margin:6px 0}
   <p><label>Match ends <select id=endmode>
        <option value=grace>2 min grace after first finisher<option value=first>When first player finishes<option value=timer>Only at timer / everyone done</select></label>
      <label>Ranking <select id=scoring>
-       <option value=speed>Fastest solve<option value=tests>Most tests passed<option value=efficiency>Most efficient (fewest lines run)</select></label></p>
+       <option value=speed>Fastest solve<option value=tests>Most tests passed<option value=steps>Fewest steps (time efficiency)<option value=space>Lowest memory</select></label></p>
   <button id=create>Create match</button>
 </div>
 
@@ -51,8 +56,10 @@ fieldset{border:1px solid #444;border-radius:6px;margin:6px 0}
     <p>Send this link to your opponents:</p>
     <input id=link readonly size=40 aria-label="Invite link"> <button id=copy>Copy link</button></div>
   <button id=start class=hide>Start match</button>
-  <table id=board class=hide><caption>Standings</caption>
-    <thead><tr><th scope=col>#<th scope=col>Player<th scope=col>Solved<th scope=col>Tests<th scope=col>Lines run<th scope=col>Time</tr></thead><tbody></tbody></table>
+  <table id=board class=hide><caption id=cap></caption>
+    <thead><tr><th scope=col>#<th scope=col>Player<th scope=col>Solved<th scope=col>Tests passed<th scope=col>Steps<th scope=col>Memory<th scope=col>Growth<th scope=col>Solve time</tr></thead><tbody></tbody></table>
+  <p id=legend class=hide>Steps = lines of your code executed across all tests (fewer = faster). Memory = peak extra memory your solution allocated (lower = better). Growth = rough time-complexity guess from how steps grow with input size. Solve time = time from match start until you solved. The bold column ranks the match.</p>
+  <details id=tl class=hide open><summary>Match timeline</summary><ol id=tlist></ol></details>
   <div id=play class=hide>
     <div id=tabs role=tablist aria-label="Problems"></div>
     <h2><span id=title></span> <b id=clock></b></h2>
@@ -68,18 +75,20 @@ const show = (id, on) => $(id).classList.toggle('hide', !on);
 const uid = () => crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
 const pid = localStorage.pid ||= uid();
 const code = location.pathname.startsWith('/r/') ? location.pathname.slice(3) : null;
-const RANK = { speed: 'fastest solve', tests: 'most tests passed', efficiency: 'fewest lines run' };
+const RANK = { speed: 'fastest solve', tests: 'most tests passed', steps: 'fewest steps', space: 'lowest memory' };
+const growth = s => s == null ? '-' : '~' + (s < 0.12 ? 'O(1)' : s < 0.55 ? 'O(log n)' : s < 1.15 ? 'O(n)' : s < 1.5 ? 'O(n log n)' : s < 2.3 ? 'O(n²)' : 'O(n³)+');
+const fmtSpace = b => b == null || b < 0 ? '-' : b < 1024 ? b + ' B' : (b / 1024).toFixed(1) + ' KB';
 let ws, S, deadline = 0, editor, worker, ready, lastRound = -1, cur = 0, drafts = {}, busy = false, stop = false, myName = '', lastSay = -1;
 
-function say(t) {
+const say = t => { // screen-reader announcements only (visually hidden)
   const d = document.createElement('div'); d.textContent = t; $('log').append(d);
   while ($('log').children.length > 6) $('log').firstChild.remove();
-}
+};
 const send = (type, extra = {}) => ws?.readyState === 1 && ws.send(JSON.stringify({ type, ...extra }));
 
 /* ---------- home ---------- */
 async function create() {
-  const b = $('create'); b.setAttribute('aria-busy', 'true');
+  const b = $('create'); b.setAttribute('aria-busy', 'true'); $('msg').textContent = '';
   const body = {
     difficulties: [...document.querySelectorAll('.diff:checked')].map(x => x.value),
     topics: $('topics').value.split(',').map(s => s.trim()).filter(Boolean),
@@ -90,7 +99,7 @@ async function create() {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Failed to create match');
     location.href = '/r/' + j.code;
-  } catch (e) { b.removeAttribute('aria-busy'); say(e.message); }
+  } catch (e) { b.removeAttribute('aria-busy'); $('msg').textContent = e.message; }
 }
 
 /* ---------- room ---------- */
@@ -109,14 +118,16 @@ function initRoom() {
   $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') joinWithName(); });
   $('start').addEventListener('click', () => send('start'));
   $('submit').addEventListener('click', submit);
-  $('copy').addEventListener('click', () => navigator.clipboard.writeText(location.href).then(() => say('Link copied')));
+  $('copy').addEventListener('click', () => navigator.clipboard.writeText(location.href).then(() => {
+    $('copy').textContent = 'Copied ✓'; setTimeout(() => { $('copy').textContent = 'Copy link'; }, 1500);
+  }));
   if (localStorage.myName) go(localStorage.myName);
   else { show('nameBox', true); $('nameIn').focus(); }
 }
 function joinWithName() {
   const n = $('nameIn').value.trim().slice(0, 20);
-  if (!n) { say('Enter a name first'); $('nameIn').focus(); return; }
-  localStorage.myName = n; show('nameBox', false); go(n);
+  if (!n) { $('msg').textContent = 'Enter a name first'; $('nameIn').focus(); return; }
+  $('msg').textContent = ''; localStorage.myName = n; show('nameBox', false); go(n);
 }
 function go(n) { myName = n; connect(); }
 
@@ -138,15 +149,24 @@ function connect() {
 
 function render() {
   const lobby = S.state === 'lobby', isHost = S.hostId === pid, c = S.cfg, top = S.players[0];
-  show('lobby', lobby); show('play', !lobby); show('board', true);
+  show('lobby', lobby); show('play', !lobby); show('board', true); show('legend', !lobby);
   show('start', isHost && S.players.length >= 2 && S.state !== 'running');
   $('start').textContent = lobby ? 'Start match' : 'Rematch';
   $('link').value = location.href;
+  $('submit').setAttribute('aria-disabled', String(S.state !== 'running'));
   $('status').textContent = lobby
     ? `${S.players.length} of ${c.max} players joined. ${isHost ? 'Start when ready.' : 'Waiting for the host to start.'}`
-    : S.state === 'running' ? `Match running. Ranking: ${RANK[c.scoring]}.`
-    : `${S.reason}. ` + (top && (top.solved || top.passed) ? `Winner: ${top.name}` : 'No winner.');
+    : S.state === 'running' ? `Match running. Ranked by: ${RANK[c.scoring]}.`
+    : `${S.reason}. ` + (top && (top.solved || top.passed) ? `Winner: ${top.name}. ` : 'No winner. ') + `Ranked by: ${RANK[c.scoring]}.`;
+  $('cap').textContent = `Standings (ranked by ${RANK[c.scoring]})`;
   renderBoard();
+  const hasTl = S.state === 'finished' && S.timeline?.length > 0;
+  show('tl', hasTl);
+  if (hasTl) $('tlist').replaceChildren(...S.timeline.map(e => {
+    const li = document.createElement('li');
+    li.textContent = `${Math.floor(e.t / 60)}:${String(e.t % 60).padStart(2, '0')}  ${e.text}`;
+    return li;
+  }));
   if (S.problems && S.round !== lastRound) {
     lastRound = S.round; drafts = {}; cur = 0; buildTabs(); selectTab(0, true); $('res').textContent = '';
   }
@@ -154,13 +174,17 @@ function render() {
 }
 
 function renderBoard() {
+  const rk = { tests: 3, steps: 4, space: 5, speed: 7 }[S.cfg.scoring];
+  [...$('board').tHead.rows[0].cells].forEach((th, i) => th.classList.toggle('rk', i === rk));
   const tb = $('board').tBodies[0]; tb.replaceChildren();
   S.players.forEach((p, i) => {
     const tr = tb.insertRow();
     [i + 1,
-     p.name + (p.id === pid ? ' (you)' : '') + (p.online ? '' : ' (offline)') + (p.id === S.hostId ? ' ★' : ''),
-     `${p.solved}/${S.cfg.n}`, p.passed, p.solved ? p.cost : '-', p.solved ? (p.at / 1000).toFixed(1) + 's' : '-',
-    ].forEach(v => { tr.insertCell().textContent = v; });
+     p.name + (p.id === pid ? ' (you)' : '') + (p.id === S.hostId ? ' (host)' : '') + (p.online ? '' : ' (offline)'),
+     `${p.solved}/${S.cfg.n}`, p.passed,
+     p.solved ? p.steps : '-', p.solved ? fmtSpace(p.space) : '-', p.solved ? growth(p.slope) : '-',
+     p.solved ? (p.at / 1000).toFixed(1) + 's' : '-',
+    ].forEach((v, j) => { const td = tr.insertCell(); td.textContent = v; if (j === rk) td.classList.add('rk'); });
   });
 }
 
@@ -207,17 +231,18 @@ function runTests(src, p) {
   });
 }
 async function submit() {
-  if (!S || S.state !== 'running') return say('The match is not running');
-  if (busy) return;
+  if (!S || S.state !== 'running' || busy) return;
   const idx = cur, p = S.problems[idx], b = $('submit');
   busy = true; b.setAttribute('aria-busy', 'true'); b.textContent = 'Running…';
   $('res').textContent = 'Running… (the first run loads Python, about 10s)';
   const r = await runTests(editor.getValue(), p);
   busy = false; b.removeAttribute('aria-busy'); b.textContent = 'Submit (Ctrl/Cmd+Enter)';
   if (r.error) { $('res').textContent = 'Error: ' + r.error; return; }
-  $('res').textContent = `${r.passed}/${r.total} passed` + (r.passed === r.total ? ` · ${r.cost} lines run` : '') +
+  const ok = r.passed === r.total;
+  $('res').textContent = `${r.passed}/${r.total} passed` +
+    (ok ? ` · ${r.steps} steps · memory ${fmtSpace(r.space)} · growth ${growth(r.slope)}` : '') +
     (r.fail ? `\nFailed: args=${JSON.stringify(r.fail.args).slice(0, 300)} expected=${JSON.stringify(r.fail.expected).slice(0, 300)} got=${String(r.fail.got).slice(0, 300)}` : '');
-  send('result', { idx, passed: r.passed, cost: r.cost || 0 });
+  send('result', { idx, passed: r.passed, steps: r.steps || 0, space: r.space ?? -1, slope: r.slope ?? null });
 }
 
 if (!code) { show('home', true); $('create').addEventListener('click', create); }

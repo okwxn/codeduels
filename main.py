@@ -18,7 +18,7 @@ class CreateReq(BaseModel):
     n_problems: int = 1
     end_mode: str = "grace"   # first | grace | timer
     grace: int = 120
-    scoring: str = "speed"    # speed | tests | efficiency
+    scoring: str = "speed"    # speed | tests | steps | space
 
 
 class Room:
@@ -29,12 +29,13 @@ class Room:
         self.n = min(max(c.n_problems, 1), len(pool), 5)
         self.end_mode = c.end_mode if c.end_mode in ("first", "grace", "timer") else "grace"
         self.grace = min(max(c.grace, 10), 600)
-        self.scoring = c.scoring if c.scoring in ("speed", "tests", "efficiency") else "speed"
+        self.scoring = c.scoring if c.scoring in ("speed", "tests", "steps", "space") else "speed"
         self.problems, self.state = [], "lobby"
         self.host: str | None = None
         self.players: dict[str, dict] = {}
         self.ends_at = self.started_at = 0.0
         self.round, self.reason, self.first_done = 0, "", False
+        self.events: list[dict] = []
         self.timer = None
         self.last = time.time()
 
@@ -42,20 +43,24 @@ class Room:
     def stats(self, p):
         vs = list(p["prog"].values())
         sv = [v for v in vs if v["solved"]]
+        slopes = [v["slope"] for v in sv if v["slope"] is not None]
         return {"solved": len(sv), "passed": sum(v["passed"] for v in vs),
-                "at": sum(v["at"] for v in sv), "cost": sum(v["cost"] for v in sv),
+                "at": sum(v["at"] for v in sv), "steps": sum(v["steps"] for v in sv),
+                "space": max([v["space"] for v in sv], default=-1),
+                "slope": max(slopes) if slopes else None,
                 "attempts": sum(v["attempts"] for v in vs)}
 
     def rank_key(self, s):
         if self.scoring == "tests":
             return (-s["passed"], s["at"])
-        if self.scoring == "efficiency":
-            return (-s["solved"], s["cost"], s["at"])
+        if self.scoring == "steps":
+            return (-s["solved"], s["steps"], s["at"])
+        if self.scoring == "space":
+            return (-s["solved"], s["space"] if s["space"] >= 0 else 10**12, s["at"])
         return (-s["solved"], s["at"])
 
     def snap(self):
-        rows = [{"id": i, "name": p["name"], "online": p["ws"] is not None,
-                 **self.stats(p),
+        rows = [{"id": i, "name": p["name"], "online": p["ws"] is not None, **self.stats(p),
                  "prog": {k: {"passed": v["passed"], "total": v["total"], "solved": v["solved"]}
                           for k, v in p["prog"].items()}}
                 for i, p in self.players.items()]
@@ -65,6 +70,7 @@ class Room:
                 "remainingMs": max(0, int((self.ends_at - time.time()) * 1000)),
                 "players": rows,
                 "problems": self.problems if self.state != "lobby" else None,
+                "timeline": self.events if self.state == "finished" else [],
                 "cfg": {"max": self.max_players, "n": self.n, "endMode": self.end_mode,
                         "grace": self.grace, "scoring": self.scoring, "minutes": self.minutes}}
 
@@ -83,6 +89,7 @@ class Room:
         await self.send_all(self.snap())
 
     async def say(self, text):
+        self.events.append({"t": int(time.time() - self.started_at), "text": text})
         await self.send_all({"type": "event", "text": text})
 
     # ---- lifecycle ----
@@ -110,33 +117,37 @@ class Room:
         for p in self.players.values():
             p["prog"] = {}
         self.round += 1
+        self.events = []
         self.state, self.reason, self.first_done = "running", "", False
         self.started_at = time.time()
         self.ends_at = self.started_at + self.minutes * 60
         self._arm()
         await self.broadcast()
 
-    async def result(self, pid, idx, passed, cost):
+    async def result(self, pid, idx, passed, steps, space, slope):
         if self.state != "running" or time.time() > self.ends_at:
             return
         if not isinstance(idx, int) or not 0 <= idx < len(self.problems):
             return
         try:
-            passed, cost = int(passed), max(0, int(cost))
+            passed, steps, space = int(passed), max(0, int(steps)), max(-1, int(space))
+            slope = None if slope is None else float(slope)
         except (TypeError, ValueError):
             return
+        if slope is not None and not -1 <= slope <= 6:  # also rejects NaN
+            slope = None
         pr = self.problems[idx]
         total = len(pr["tests"])
         passed = min(max(passed, 0), total)
         p = self.players[pid]
-        v = p["prog"].setdefault(idx, {"passed": 0, "total": total, "solved": False,
-                                       "at": 0, "cost": 0, "attempts": 0})
+        v = p["prog"].setdefault(idx, {"passed": 0, "total": total, "solved": False, "at": 0,
+                                       "steps": 0, "space": -1, "slope": None, "attempts": 0})
         if v["solved"]:
             return
         v["attempts"] += 1
         v["passed"] = max(v["passed"], passed)
         if passed == total:
-            v["solved"], v["cost"] = True, cost
+            v["solved"], v["steps"], v["space"], v["slope"] = True, steps, space, slope
             v["at"] = int((time.time() - self.started_at) * 1000)
             await self.say(f"{p['name']} solved {pr['title']} in {v['at'] / 1000:.0f}s")
         else:
@@ -226,7 +237,8 @@ async def ws_endpoint(ws: WebSocket, room: str, pid: str, name: str = "anon"):
             if t == "start" and pid == r.host and r.state != "running" and len(r.players) >= 2:
                 await r.start()
             elif t == "result":
-                await r.result(pid, m.get("idx"), m.get("passed", 0), m.get("cost", 0))
+                await r.result(pid, m.get("idx"), m.get("passed", 0), m.get("steps", 0),
+                               m.get("space", -1), m.get("slope"))
     except WebSocketDisconnect:
         pass
     finally:
