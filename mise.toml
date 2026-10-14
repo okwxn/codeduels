@@ -9,3 +9,10 @@ run = "uv run uvicorn main:app --reload --port 3000"
 [tasks.deploy]
 description = "ship to fly"
 run = "git push"
+
+[tasks.gen]
+run = "uv run python tools/gen_tests.py"
+
+[tasks.add]
+description = "clipboard -> new problem folder(s) -> generate tests"
+run = "pbpaste | uv run python tools/new_problem.py && uv run python tools/gen_tests.py"

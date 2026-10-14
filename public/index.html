@@ -2,127 +2,224 @@
 <title>CodeDuels</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚔️</text></svg>">
 <style>
-body{font:15px system-ui;background:#111;color:#eee;max-width:1000px;margin:0 auto;padding:16px}
-input,select,button{font:inherit;padding:6px 10px;margin:2px;background:#222;color:#eee;border:1px solid #444;border-radius:6px}
-button{cursor:pointer;background:#2d6cdf;border:0}
+:root{color-scheme:dark}
+body{font:15px/1.4 system-ui;background:#111;color:#eee;max-width:1000px;margin:0 auto;padding:16px}
+a{color:inherit;text-decoration:none}
+input,select,button{font:inherit;padding:8px 12px;margin:2px;background:#222;color:#eee;border:1px solid #555;border-radius:6px}
+button{cursor:pointer;background:#2d6cdf;border-color:#2d6cdf;transition:transform .05s}
+button:hover{filter:brightness(1.15)}
+button:active{transform:scale(.96);filter:brightness(.8)}
+button[aria-busy=true]{opacity:.6;cursor:progress}
+[role=tab]{background:#333;border-color:#555}
+[role=tab][aria-selected=true]{background:#eee;color:#111}
+:focus-visible{outline:3px solid #ffd54a;outline-offset:2px}
 pre{white-space:pre-wrap;background:#1a1a1a;padding:10px;border-radius:6px}
-#ed{height:360px;border:1px solid #333}.hide{display:none}
+#ed{height:360px;border:1px solid #333}
+#log{min-height:1.4em;color:#ffd54a;margin-bottom:8px}
+table{border-collapse:collapse;width:100%;margin:8px 0}
+td,th{padding:4px 8px;border-bottom:1px solid #333;text-align:left}
+fieldset{border:1px solid #444;border-radius:6px;margin:6px 0}
+.hide{display:none}
 </style>
-<h2><a href="/" style="color:inherit;text-decoration:none">CodeDuels</a></h2>
+<h1><a href="/">CodeDuels</a></h1>
+<div id=log role=log aria-live=polite></div>
 
 <div id=home class=hide>
   <p>No signup. Create a match, send the link.</p>
-  <p>Difficulty:
+  <fieldset><legend>Difficulty</legend>
     <label><input type=checkbox class=diff value=easy checked> easy</label>
     <label><input type=checkbox class=diff value=medium> medium</label>
-    <label><input type=checkbox class=diff value=hard> hard</label></p>
-  <p>Topics (comma-separated, blank = any): <input id=topics placeholder="two-pointers, sliding-window"></p>
-  <p>Minutes: <select id=mins><option>5<option selected>10<option>15</select></p>
-  <button onclick=create()>Create match</button>
+    <label><input type=checkbox class=diff value=hard> hard</label></fieldset>
+  <p><label>Topics (comma-separated, blank = any) <input id=topics placeholder="two-pointers, sliding-window"></label></p>
+  <p><label>Minutes <select id=mins><option>5<option selected>10<option>15<option>30</select></label>
+     <label>Max players <select id=maxp><option>2<option>3<option>4<option>5<option>6</select></label>
+     <label>Problems <select id=nprob><option>1<option>2<option>3<option>5</select></label></p>
+  <p><label>Match ends <select id=endmode>
+       <option value=grace>2 min grace after first finisher<option value=first>When first player finishes<option value=timer>Only at timer / everyone done</select></label>
+     <label>Ranking <select id=scoring>
+       <option value=speed>Fastest solve<option value=tests>Most tests passed<option value=efficiency>Most efficient (fewest lines run)</select></label></p>
+  <button id=create>Create match</button>
 </div>
 
 <div id=room class=hide>
-  <p id=players></p><p id=banner></p>
+  <div id=nameBox class=hide>
+    <label>Your name <input id=nameIn maxlength=20 autocomplete=nickname></label>
+    <button id=nameBtn>Join</button></div>
+  <p id=conn role=status></p>
+  <p id=status role=status></p>
   <div id=lobby class=hide>
-    <p>Send this link to your opponent:</p>
-    <input id=link readonly size=40 onclick="this.select()">
-  </div>
-  <button id=start class=hide onclick="send('start')">Start</button>
+    <p>Send this link to your opponents:</p>
+    <input id=link readonly size=40 aria-label="Invite link"> <button id=copy>Copy link</button></div>
+  <button id=start class=hide>Start match</button>
+  <table id=board class=hide><caption>Standings</caption>
+    <thead><tr><th scope=col>#<th scope=col>Player<th scope=col>Solved<th scope=col>Tests<th scope=col>Lines run<th scope=col>Time</tr></thead><tbody></tbody></table>
   <div id=play class=hide>
-    <h3><span id=title></span> <b id=clock></b></h3>
+    <div id=tabs role=tablist aria-label="Problems"></div>
+    <h2><span id=title></span> <b id=clock></b></h2>
     <pre id=stmt></pre><div id=ed></div>
-    <button onclick=submitCode()>Submit</button><pre id=res></pre>
+    <button id=submit>Submit (Ctrl/Cmd+Enter)</button><pre id=res></pre>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs/loader.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const uid = () => crypto.randomUUID?.() ?? (Math.random().toString(36).slice(2) + Date.now().toString(36));
+const show = (id, on) => $(id).classList.toggle('hide', !on);
+const uid = () => crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
 const pid = localStorage.pid ||= uid();
 const code = location.pathname.startsWith('/r/') ? location.pathname.slice(3) : null;
-const send = t => ws.send(JSON.stringify({ type: t }));
+const RANK = { speed: 'fastest solve', tests: 'most tests passed', efficiency: 'fewest lines run' };
+let ws, S, deadline = 0, editor, worker, ready, lastRound = -1, cur = 0, drafts = {}, busy = false, stop = false, myName = '', lastSay = -1;
 
+function say(t) {
+  const d = document.createElement('div'); d.textContent = t; $('log').append(d);
+  while ($('log').children.length > 6) $('log').firstChild.remove();
+}
+const send = (type, extra = {}) => ws?.readyState === 1 && ws.send(JSON.stringify({ type, ...extra }));
+
+/* ---------- home ---------- */
 async function create() {
+  const b = $('create'); b.setAttribute('aria-busy', 'true');
   const body = {
     difficulties: [...document.querySelectorAll('.diff:checked')].map(x => x.value),
     topics: $('topics').value.split(',').map(s => s.trim()).filter(Boolean),
-    minutes: +$('mins').value };
-  const r = await fetch('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json();
-  if (!r.ok) return alert(j.error);
-  location.href = '/r/' + j.code;
+    minutes: +$('mins').value, max_players: +$('maxp').value, n_problems: +$('nprob').value,
+    end_mode: $('endmode').value, scoring: $('scoring').value };
+  try {
+    const r = await fetch('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Failed to create match');
+    location.href = '/r/' + j.code;
+  } catch (e) { b.removeAttribute('aria-busy'); say(e.message); }
 }
 
-if (!code) $('home').classList.remove('hide');
-else {
-  $('room').classList.remove('hide');
-  var myName = localStorage.myName ||= (prompt('Your name?') || 'anon').slice(0, 20);
-  var ws, S, deadline = 0, editor, worker, lastRound = -1;
-
-  const ready = new Promise(res => {
+/* ---------- room ---------- */
+function initRoom() {
+  show('room', true);
+  ready = new Promise(res => {
     require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs' } });
     require(['vs/editor/editor.main'], () => {
-      editor = monaco.editor.create($('ed'), { value: '', language: 'python', theme: 'vs-dark',
-        minimap: { enabled: false }, automaticLayout: true });
+      editor = monaco.editor.create($('ed'), { value: '', language: 'python', theme: 'vs-dark', minimap: { enabled: false }, automaticLayout: true });
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, submit);
       res();
     });
   });
-  const setCode = async c => { await ready; editor.setValue(c); };
-  const newWorker = () => (worker = new Worker('/worker.js'));
   newWorker();
-
-  function connect() {
-    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${code}&pid=${pid}&name=${encodeURIComponent(myName)}`);
-    ws.onmessage = e => {
-      const m = JSON.parse(e.data);
-      if (m.type === 'full') { ws.onclose = null; return $('banner').textContent = 'Room is full'; }
-      S = m; deadline = Date.now() + m.remainingMs; render();
-    };
-    ws.onclose = () => setTimeout(connect, 1500);
-  }
-  connect();
-
-  function render() {
-    const isHost = S.hostId === pid;
-    $('players').textContent = S.players.map(p => p.name + (p.online ? '' : ' (offline)') + (p.id === S.hostId ? ' ★' : '')).join('  vs  ');
-    $('link').value = location.href;
-    $('lobby').classList.toggle('hide', S.state !== 'lobby');
-    $('play').classList.toggle('hide', S.state === 'lobby');
-    $('start').classList.toggle('hide', !(isHost && S.players.length === 2 && S.state !== 'running'));
-    $('start').textContent = S.state === 'lobby' ? 'Start' : 'Rematch';
-    if (S.problem && S.round !== lastRound) {
-      lastRound = S.round;
-      $('title').textContent = `${S.problem.title} [${S.problem.difficulty}]`;
-      $('stmt').textContent = S.problem.statement;
-      $('res').textContent = '';
-      setCode(S.problem.starter);
-    }
-    $('banner').textContent = S.state !== 'finished' ? '' :
-      S.winner ? `🏆 ${S.winner.name} solved it in ${(S.winner.ms / 1000).toFixed(1)}s` : "Time's up, draw";
-  }
-
-  setInterval(() => {
-    if (S?.state !== 'running') return;
-    const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-    $('clock').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
-  }, 250);
-
-  function runTests(src, p) {
-    return new Promise(res => {
-      const t = setTimeout(() => { worker.terminate(); newWorker(); res({ error: 'Timed out, infinite loop?' }); }, 20000);
-      worker.onmessage = e => { clearTimeout(t); res(e.data); };
-      worker.postMessage({ code: src, entry: p.entry, tests: p.tests });
-    });
-  }
- window.submitCode = async function () {
-    if (S?.state !== 'running') return;
-    $('res').textContent = 'Running… (first run loads Python, takes a few secs)';
-    const r = await runTests(editor.getValue(), S.problem);
-    if (r.error) return $('res').textContent = 'Error: ' + r.error;
-    $('res').textContent = `${r.passed}/${r.total} passed` +
-      (r.fail ? `\nFailed: args=${JSON.stringify(r.fail.args)} expected=${JSON.stringify(r.fail.expected)} got=${r.fail.got}` : '');
-    if (r.passed === r.total) send('solved');
-  }
+  $('nameBtn').addEventListener('click', joinWithName);
+  $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') joinWithName(); });
+  $('start').addEventListener('click', () => send('start'));
+  $('submit').addEventListener('click', submit);
+  $('copy').addEventListener('click', () => navigator.clipboard.writeText(location.href).then(() => say('Link copied')));
+  if (localStorage.myName) go(localStorage.myName);
+  else { show('nameBox', true); $('nameIn').focus(); }
 }
+function joinWithName() {
+  const n = $('nameIn').value.trim().slice(0, 20);
+  if (!n) { say('Enter a name first'); $('nameIn').focus(); return; }
+  localStorage.myName = n; show('nameBox', false); go(n);
+}
+function go(n) { myName = n; connect(); }
+
+function connect() {
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${code}&pid=${pid}&name=${encodeURIComponent(myName)}`);
+  ws.onopen = () => { $('conn').textContent = ''; };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (['full', 'closed', 'gone'].includes(m.type)) {
+      stop = true;
+      $('status').textContent = { full: 'Room is full.', closed: 'This match already started.', gone: 'Room not found. It may have expired.' }[m.type];
+      return;
+    }
+    if (m.type === 'event') return say(m.text);
+    S = m; deadline = Date.now() + m.remainingMs; render();
+  };
+  ws.onclose = () => { if (stop) return; $('conn').textContent = 'Connection lost. Reconnecting…'; setTimeout(connect, 1500); };
+}
+
+function render() {
+  const lobby = S.state === 'lobby', isHost = S.hostId === pid, c = S.cfg, top = S.players[0];
+  show('lobby', lobby); show('play', !lobby); show('board', true);
+  show('start', isHost && S.players.length >= 2 && S.state !== 'running');
+  $('start').textContent = lobby ? 'Start match' : 'Rematch';
+  $('link').value = location.href;
+  $('status').textContent = lobby
+    ? `${S.players.length} of ${c.max} players joined. ${isHost ? 'Start when ready.' : 'Waiting for the host to start.'}`
+    : S.state === 'running' ? `Match running. Ranking: ${RANK[c.scoring]}.`
+    : `${S.reason}. ` + (top && (top.solved || top.passed) ? `Winner: ${top.name}` : 'No winner.');
+  renderBoard();
+  if (S.problems && S.round !== lastRound) {
+    lastRound = S.round; drafts = {}; cur = 0; buildTabs(); selectTab(0, true); $('res').textContent = '';
+  }
+  if (S.problems) updateTabs();
+}
+
+function renderBoard() {
+  const tb = $('board').tBodies[0]; tb.replaceChildren();
+  S.players.forEach((p, i) => {
+    const tr = tb.insertRow();
+    [i + 1,
+     p.name + (p.id === pid ? ' (you)' : '') + (p.online ? '' : ' (offline)') + (p.id === S.hostId ? ' ★' : ''),
+     `${p.solved}/${S.cfg.n}`, p.passed, p.solved ? p.cost : '-', p.solved ? (p.at / 1000).toFixed(1) + 's' : '-',
+    ].forEach(v => { tr.insertCell().textContent = v; });
+  });
+}
+
+function buildTabs() {
+  const t = $('tabs'); t.replaceChildren();
+  S.problems.forEach((_, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab');
+    b.addEventListener('click', () => selectTab(i)); t.append(b);
+  });
+}
+function updateTabs() {
+  const me = S.players.find(p => p.id === pid);
+  [...$('tabs').children].forEach((b, i) => {
+    const v = me?.prog?.[i];
+    b.textContent = `${i + 1}. ${S.problems[i].title}` + (v?.solved ? ' ✓' : v ? ` (${v.passed}/${v.total})` : '');
+    b.setAttribute('aria-selected', String(i === cur));
+  });
+}
+async function selectTab(i, first) {
+  await ready;
+  if (!first) drafts[cur] = editor.getValue();
+  cur = i;
+  const p = S.problems[i];
+  $('title').textContent = `${p.title} [${p.difficulty}]`;
+  $('stmt').textContent = p.statement;
+  editor.setValue(drafts[i] ?? p.starter);
+  updateTabs();
+}
+
+setInterval(() => {
+  if (S?.state !== 'running') { $('clock').textContent = ''; return; }
+  const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  $('clock').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  if ([60, 30, 10].includes(s) && lastSay !== s) { lastSay = s; say(`${s} seconds left`); }
+}, 250);
+
+/* ---------- judging ---------- */
+const newWorker = () => (worker = new Worker('/worker.js'));
+function runTests(src, p) {
+  return new Promise(res => {
+    const t = setTimeout(() => { worker.terminate(); newWorker(); res({ error: 'Timed out (20s). Infinite loop?' }); }, 20000);
+    worker.onmessage = e => { clearTimeout(t); res(e.data); };
+    worker.postMessage({ code: src, entry: p.entry, tests: p.tests, checker: p.checker || '' });
+  });
+}
+async function submit() {
+  if (!S || S.state !== 'running') return say('The match is not running');
+  if (busy) return;
+  const idx = cur, p = S.problems[idx], b = $('submit');
+  busy = true; b.setAttribute('aria-busy', 'true'); b.textContent = 'Running…';
+  $('res').textContent = 'Running… (the first run loads Python, about 10s)';
+  const r = await runTests(editor.getValue(), p);
+  busy = false; b.removeAttribute('aria-busy'); b.textContent = 'Submit (Ctrl/Cmd+Enter)';
+  if (r.error) { $('res').textContent = 'Error: ' + r.error; return; }
+  $('res').textContent = `${r.passed}/${r.total} passed` + (r.passed === r.total ? ` · ${r.cost} lines run` : '') +
+    (r.fail ? `\nFailed: args=${JSON.stringify(r.fail.args).slice(0, 300)} expected=${JSON.stringify(r.fail.expected).slice(0, 300)} got=${String(r.fail.got).slice(0, 300)}` : '');
+  send('result', { idx, passed: r.passed, cost: r.cost || 0 });
+}
+
+if (!code) { show('home', true); $('create').addEventListener('click', create); }
+else initRoom();
 </script>

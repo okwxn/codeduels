@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-PROBLEMS = json.loads(Path("problems.json").read_text())
+PROBLEMS = [json.loads(f.read_text()) for f in sorted(Path("problems").glob("*.json"))]
 rooms: dict[str, "Room"] = {}
 
 
@@ -14,65 +14,148 @@ class CreateReq(BaseModel):
     difficulties: list[str] = ["easy"]
     topics: list[str] = []
     minutes: int = 10
+    max_players: int = 2
+    n_problems: int = 1
+    end_mode: str = "grace"   # first | grace | timer
+    grace: int = 120
+    scoring: str = "speed"    # speed | tests | efficiency
 
 
 class Room:
-    def __init__(self, pool, minutes):
-        self.pool, self.minutes = pool, minutes
-        self.problem = None
-        self.state = "lobby"
+    def __init__(self, pool, c: CreateReq):
+        self.pool = pool
+        self.minutes = min(max(c.minutes, 1), 30)
+        self.max_players = min(max(c.max_players, 2), 6)
+        self.n = min(max(c.n_problems, 1), len(pool), 5)
+        self.end_mode = c.end_mode if c.end_mode in ("first", "grace", "timer") else "grace"
+        self.grace = min(max(c.grace, 10), 600)
+        self.scoring = c.scoring if c.scoring in ("speed", "tests", "efficiency") else "speed"
+        self.problems, self.state = [], "lobby"
         self.host: str | None = None
         self.players: dict[str, dict] = {}
         self.ends_at = self.started_at = 0.0
-        self.round = 0
-        self.winner = None
+        self.round, self.reason, self.first_done = 0, "", False
         self.timer = None
         self.last = time.time()
 
-    def snap(self):
-        return {
-            "type": "state", "state": self.state, "hostId": self.host,
-            "round": self.round, "winner": self.winner,
-            "remainingMs": max(0, int((self.ends_at - time.time()) * 1000)),
-            "players": [{"id": i, "name": p["name"], "online": p["ws"] is not None}
-                        for i, p in self.players.items()],
-            "problem": None if self.state == "lobby" else self.problem,
-        }
+    # ---- scoring ----
+    def stats(self, p):
+        vs = list(p["prog"].values())
+        sv = [v for v in vs if v["solved"]]
+        return {"solved": len(sv), "passed": sum(v["passed"] for v in vs),
+                "at": sum(v["at"] for v in sv), "cost": sum(v["cost"] for v in sv),
+                "attempts": sum(v["attempts"] for v in vs)}
 
-    async def broadcast(self):
+    def rank_key(self, s):
+        if self.scoring == "tests":
+            return (-s["passed"], s["at"])
+        if self.scoring == "efficiency":
+            return (-s["solved"], s["cost"], s["at"])
+        return (-s["solved"], s["at"])
+
+    def snap(self):
+        rows = [{"id": i, "name": p["name"], "online": p["ws"] is not None,
+                 **self.stats(p),
+                 "prog": {k: {"passed": v["passed"], "total": v["total"], "solved": v["solved"]}
+                          for k, v in p["prog"].items()}}
+                for i, p in self.players.items()]
+        rows.sort(key=self.rank_key)
+        return {"type": "state", "state": self.state, "hostId": self.host, "round": self.round,
+                "reason": self.reason,
+                "remainingMs": max(0, int((self.ends_at - time.time()) * 1000)),
+                "players": rows,
+                "problems": self.problems if self.state != "lobby" else None,
+                "cfg": {"max": self.max_players, "n": self.n, "endMode": self.end_mode,
+                        "grace": self.grace, "scoring": self.scoring, "minutes": self.minutes}}
+
+    # ---- messaging ----
+    async def send_all(self, msg):
         self.last = time.time()
-        msg = json.dumps(self.snap())
+        data = json.dumps(msg)
         for p in list(self.players.values()):
             if p["ws"]:
                 try:
-                    await p["ws"].send_text(msg)
+                    await p["ws"].send_text(data)
                 except Exception:
                     p["ws"] = None
 
-    async def finish(self, pid=None):
+    async def broadcast(self):
+        await self.send_all(self.snap())
+
+    async def say(self, text):
+        await self.send_all({"type": "event", "text": text})
+
+    # ---- lifecycle ----
+    def _arm(self):
+        if self.timer:
+            self.timer.cancel()
+        self.timer = asyncio.create_task(self._timeout(max(0, self.ends_at - time.time())))
+
+    async def _timeout(self, delay):
+        await asyncio.sleep(delay)
+        self.timer = None
+        await self.finish("Time's up")
+
+    async def finish(self, reason):
         if self.timer:
             self.timer.cancel()
             self.timer = None
-        self.state = "finished"
-        self.winner = ({"id": pid, "name": self.players[pid]["name"],
-                        "ms": int((time.time() - self.started_at) * 1000)} if pid else None)
+        self.state, self.reason = "finished", reason
         await self.broadcast()
 
-    async def _timeout(self):
-        await asyncio.sleep(self.minutes * 60)
-        self.timer = None
-        await self.finish()
-
     async def start(self):
-        opts = [p for p in self.pool if p is not self.problem] or self.pool
-        self.problem = random.choice(opts)
+        prev = {p["id"] for p in self.problems}
+        fresh = [p for p in self.pool if p["id"] not in prev]
+        self.problems = random.sample(fresh if len(fresh) >= self.n else self.pool, self.n)
+        for p in self.players.values():
+            p["prog"] = {}
         self.round += 1
-        self.state, self.winner = "running", None
+        self.state, self.reason, self.first_done = "running", "", False
         self.started_at = time.time()
         self.ends_at = self.started_at + self.minutes * 60
-        if self.timer:
-            self.timer.cancel()
-        self.timer = asyncio.create_task(self._timeout())
+        self._arm()
+        await self.broadcast()
+
+    async def result(self, pid, idx, passed, cost):
+        if self.state != "running" or time.time() > self.ends_at:
+            return
+        if not isinstance(idx, int) or not 0 <= idx < len(self.problems):
+            return
+        try:
+            passed, cost = int(passed), max(0, int(cost))
+        except (TypeError, ValueError):
+            return
+        pr = self.problems[idx]
+        total = len(pr["tests"])
+        passed = min(max(passed, 0), total)
+        p = self.players[pid]
+        v = p["prog"].setdefault(idx, {"passed": 0, "total": total, "solved": False,
+                                       "at": 0, "cost": 0, "attempts": 0})
+        if v["solved"]:
+            return
+        v["attempts"] += 1
+        v["passed"] = max(v["passed"], passed)
+        if passed == total:
+            v["solved"], v["cost"] = True, cost
+            v["at"] = int((time.time() - self.started_at) * 1000)
+            await self.say(f"{p['name']} solved {pr['title']} in {v['at'] / 1000:.0f}s")
+        else:
+            await self.say(f"{p['name']} submitted {pr['title']}: {passed} of {total} tests")
+        await self.check_end(pid)
+
+    async def check_end(self, pid):
+        done = lambda p: sum(1 for v in p["prog"].values() if v["solved"]) >= self.n
+        if all(done(p) for p in self.players.values()):
+            return await self.finish("Everyone finished")
+        name = self.players[pid]["name"]
+        if done(self.players[pid]) and not self.first_done:
+            self.first_done = True
+            if self.end_mode == "first":
+                return await self.finish(f"{name} finished first")
+            if self.end_mode == "grace":
+                self.ends_at = min(self.ends_at, time.time() + self.grace)
+                self._arm()
+                await self.say(f"{name} finished. {self.grace} seconds left for everyone else")
         await self.broadcast()
 
 
@@ -96,12 +179,14 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/api/rooms")
 def create_room(req: CreateReq):
+    if len(rooms) >= 200:
+        return JSONResponse({"error": "Server busy, try later"}, status_code=429)
     pool = [p for p in PROBLEMS if p["difficulty"] in req.difficulties
             and (not req.topics or set(p["tags"]) & set(req.topics))]
     if not pool:
         return JSONResponse({"error": "No problems match those filters"}, status_code=400)
     code = secrets.token_hex(3)
-    rooms[code] = Room(pool, min(max(req.minutes, 1), 30))
+    rooms[code] = Room(pool, req)
     return {"code": code}
 
 
@@ -115,28 +200,33 @@ async def ws_endpoint(ws: WebSocket, room: str, pid: str, name: str = "anon"):
     await ws.accept()
     r = rooms.get(room)
     if not r:
+        await ws.send_text(json.dumps({"type": "gone"}))
         return await ws.close()
+    name = name.strip()[:20] or "anon"
     if pid not in r.players:
-        if len(r.players) >= 2:
+        if r.state != "lobby":
+            await ws.send_text(json.dumps({"type": "closed"}))
+            return await ws.close()
+        if len(r.players) >= r.max_players:
             await ws.send_text(json.dumps({"type": "full"}))
             return await ws.close()
-        r.players[pid] = {"name": name[:20], "ws": None}
+        r.players[pid] = {"name": name, "ws": None, "prog": {}}
     p = r.players[pid]
-    p["ws"], p["name"] = ws, name[:20]
+    p["ws"], p["name"] = ws, name
     if r.host is None:
         r.host = pid
     await r.broadcast()
     try:
         while True:
-            raw = await ws.receive_text()
             try:
-                t = json.loads(raw).get("type")
+                m = json.loads(await ws.receive_text())
+                t = m.get("type")
             except (json.JSONDecodeError, AttributeError):
                 continue
-            if t == "start" and pid == r.host and r.state != "running" and len(r.players) == 2:
+            if t == "start" and pid == r.host and r.state != "running" and len(r.players) >= 2:
                 await r.start()
-            elif t == "solved" and r.state == "running" and time.time() < r.ends_at:
-                await r.finish(pid)
+            elif t == "result":
+                await r.result(pid, m.get("idx"), m.get("passed", 0), m.get("cost", 0))
     except WebSocketDisconnect:
         pass
     finally:

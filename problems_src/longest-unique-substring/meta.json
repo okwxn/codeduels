@@ -1,0 +1,4 @@
+{"id":"longest-unique-substring","title":"Longest Substring Without Repeats","difficulty":"medium","tags":["sliding-window","string","hash-map"],
+ "statement":"Given a string s, return the length of the longest substring (a contiguous part of s) that has no repeated characters.\n\nExample: \"abcabcbb\" -> 3 (\"abc\")\nExample: \"bbbbb\" -> 1\nExample: \"pwwkew\" -> 3 (\"wke\")\nAn empty string returns 0.",
+ "entry":"length_of_longest_substring","starter":"def length_of_longest_substring(s):\n    pass\n",
+ "fixed_tests":[{"args":["abcabcbb"],"expected":3},{"args":["bbbbb"],"expected":1},{"args":["pwwkew"],"expected":3},{"args":[""],"expected":0}]}

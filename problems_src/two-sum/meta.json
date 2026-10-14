@@ -1,0 +1,9 @@
+{
+    "id":"two-sum",
+    "title":"Two Sum",
+    "difficulty":"easy",
+    "tags":["array","hash-map"],
+    "statement":"You are given an integer array named nums and a specific integer value called target. Your task is to identify the positions (indices) of the two elements in the array that sum up to the target. Note: Every input is guaranteed to have exactly one unique solution. You cannot pick the exact same element from the array twice to reach the target. The resulting indices can be returned in whichever order you prefer.",
+    "entry":"two_sum",
+    "starter":"def two_sum(nums, target):\n    pass\n"
+}

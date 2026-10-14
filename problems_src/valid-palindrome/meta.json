@@ -1,0 +1,4 @@
+{"id":"valid-palindrome","title":"Valid Palindrome","difficulty":"easy","tags":["two-pointers","string"],
+ "statement":"Return True if s reads the same forwards and backwards after lowercasing it and removing every character that is not a letter or digit.\n\nExample: \"A man, a plan, a canal: Panama\" -> True\nExample: \"race a car\" -> False\nA string with no letters or digits (like \" \") counts as a palindrome.",
+ "entry":"is_palindrome","starter":"def is_palindrome(s):\n    pass\n",
+ "fixed_tests":[{"args":["A man, a plan, a canal: Panama"],"expected":true},{"args":["race a car"],"expected":false},{"args":[" "],"expected":true}]}
