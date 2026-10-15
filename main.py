@@ -246,5 +246,12 @@ async def ws_endpoint(ws: WebSocket, room: str, pid: str, name: str = "anon"):
             p["ws"] = None
         await r.broadcast()
 
+@app.get("/api/topics")
+def topics():
+    counts = {}
+    for p in PROBLEMS:
+        for t in p["tags"]:
+            counts[t] = counts.get(t, 0) + 1
+    return counts
 
 app.mount("/", StaticFiles(directory="public", html=True), name="static")  # keep LAST

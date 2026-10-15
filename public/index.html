@@ -23,6 +23,7 @@ td,th{padding:4px 8px;border-bottom:1px solid #333;text-align:left}
 .rk{font-weight:700;background:#1d2a44}
 #legend,#tl{color:#aaa;font-size:13px}
 fieldset{border:1px solid #444;border-radius:6px;margin:6px 0}
+#topicBox label{display:inline-block;margin:2px 12px 2px 0}
 .hide{display:none}
 </style>
 <h1><a href="/">CodeDuels</a></h1>
@@ -35,12 +36,14 @@ fieldset{border:1px solid #444;border-radius:6px;margin:6px 0}
     <label><input type=checkbox class=diff value=easy checked> easy</label>
     <label><input type=checkbox class=diff value=medium> medium</label>
     <label><input type=checkbox class=diff value=hard> hard</label></fieldset>
-  <p><label>Topics (comma-separated, blank = any) <input id=topics placeholder="two-pointers, sliding-window"></label></p>
+    <fieldset><legend>Topics (none ticked = any)</legend><span id=topicBox>Loading…</span></fieldset>
   <p><label>Minutes <select id=mins><option>5<option selected>10<option>15<option>30</select></label>
      <label>Max players <select id=maxp><option>2<option>3<option>4<option>5<option>6</select></label>
      <label>Problems <select id=nprob><option>1<option>2<option>3<option>5</select></label></p>
-  <p><label>Match ends <select id=endmode>
-       <option value=grace>2 min grace after first finisher<option value=first>When first player finishes<option value=timer>Only at timer / everyone done</select></label>
+  <p><label>When does the match end? <select id=endmode>
+    <option value=grace>2:00 countdown starts when someone finishes
+    <option value=first>Immediately when someone finishes
+    <option value=timer>Full time, or when everyone finishes</select></label>
      <label>Ranking <select id=scoring>
        <option value=speed>Fastest solve<option value=tests>Most tests passed<option value=steps>Fewest steps (time efficiency)<option value=space>Lowest memory</select></label></p>
   <button id=create>Create match</button>
@@ -91,7 +94,7 @@ async function create() {
   const b = $('create'); b.setAttribute('aria-busy', 'true'); $('msg').textContent = '';
   const body = {
     difficulties: [...document.querySelectorAll('.diff:checked')].map(x => x.value),
-    topics: $('topics').value.split(',').map(s => s.trim()).filter(Boolean),
+    topics: [...document.querySelectorAll('.topic:checked')].map(x => x.value),
     minutes: +$('mins').value, max_players: +$('maxp').value, n_problems: +$('nprob').value,
     end_mode: $('endmode').value, scoring: $('scoring').value };
   try {
@@ -245,6 +248,18 @@ async function submit() {
   send('result', { idx, passed: r.passed, steps: r.steps || 0, space: r.space ?? -1, slope: r.slope ?? null });
 }
 
-if (!code) { show('home', true); $('create').addEventListener('click', create); }
+async function loadTopics() {
+  try {
+    const t = await (await fetch('/api/topics')).json();
+    $('topicBox').replaceChildren(...Object.entries(t).sort().map(([k, n]) => {
+      const l = document.createElement('label'), i = document.createElement('input');
+      i.type = 'checkbox'; i.className = 'topic'; i.value = k;
+      l.append(i, ` ${k.replace(/-/g, ' ')} (${n})`);
+      return l;
+    }));
+  } catch { $('topicBox').textContent = 'Could not load topics, so any topic will be used.'; }
+}
+
+if (!code) { show('home', true); $('create').addEventListener('click', create); loadTopics(); }
 else initRoom();
 </script>
