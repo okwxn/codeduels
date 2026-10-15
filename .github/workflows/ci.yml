@@ -9,14 +9,19 @@ on:
 permissions:
   contents: read
 
+# PRs share a group per branch so new pushes cancel stale runs; main groups per commit so
+# a queued run is never dropped and every main commit gets a result
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
     name: Lint & type check
     runs-on: ubuntu-latest
+    env:
+      # Stop mise r from installing tools left out of the setup step below (e.g. github-cli)
+      MISE_TASK_RUN_AUTO_INSTALL: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
