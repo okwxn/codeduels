@@ -13,6 +13,20 @@ def load(path):
     return m
 
 
+def passes(fn, tests, chk, unordered):
+    for t in tests:
+        try:
+            got = fn(*copy.deepcopy(t["args"]))
+            if chk: ok = bool(chk(t["args"], got, t.get("expected")))
+            elif unordered: ok = sorted(got) == sorted(t["expected"])
+            else: ok = got == t["expected"]
+        except Exception:
+            ok = False
+        if not ok:
+            return False
+    return True
+
+
 def build(d: Path, n_diff=3000):
     meta = json.loads((d / "meta.json").read_text())
     ref, gen = load(d / "ref.py").solve, load(d / "gen.py").gen
@@ -40,6 +54,12 @@ def build(d: Path, n_diff=3000):
         if unordered: t["unordered"] = True
         if chk: assert chk(a, t["expected"], None), f"{meta['id']}: ref fails its own checker on {a}"
         tests.append(t)
+    
+    wrong_dir = d / "wrong"
+    for w in (sorted(wrong_dir.glob("*.py")) if wrong_dir.is_dir() else []):
+        assert not passes(load(w).solve, tests, chk, unordered), \
+            f"{meta['id']}: wrong solution {w.name} passes ALL tests, so the tests have a hole"
+    
     meta["tests"] = tests
     Path("problems").mkdir(exist_ok=True)
     Path(f"problems/{meta['id']}.json").write_text(json.dumps(meta))
@@ -47,6 +67,13 @@ def build(d: Path, n_diff=3000):
 
 
 if __name__ == "__main__":
+    bad = []
     for d in sorted(Path("problems_src").iterdir()):
         if d.is_dir():
-            build(d)
+            try:
+                build(d)
+            except Exception as e:
+                bad.append(d.name)
+                print("FAILED", d.name, "-", e)
+    if bad:
+        raise SystemExit(f"failed: {bad}")
