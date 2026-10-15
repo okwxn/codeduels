@@ -1,7 +1,23 @@
-import copy, importlib.util, json, random
+import copy
+import importlib.util
+import json
+import random
 from pathlib import Path
 
-SIZES = [0, 1, 2, 3, 5, 8, 13, 20, 50, 100, 150, 200]  # keep small: line tracing is slow in the browser
+SIZES = [
+    0,
+    1,
+    2,
+    3,
+    5,
+    8,
+    13,
+    20,
+    50,
+    100,
+    150,
+    200,
+]  # keep small: line tracing is slow in the browser
 
 
 def load(path):
@@ -17,10 +33,13 @@ def passes(fn, tests, chk, unordered):
     for t in tests:
         try:
             got = fn(*copy.deepcopy(t["args"]))
-            if chk: ok = bool(chk(t["args"], got, t.get("expected")))
-            elif unordered: ok = sorted(got) == sorted(t["expected"])
-            else: ok = got == t["expected"]
-        except Exception:
+            if chk:
+                ok = bool(chk(t["args"], got, t.get("expected")))
+            elif unordered:
+                ok = sorted(got) == sorted(t["expected"])
+            else:
+                ok = got == t["expected"]
+        except Exception:  # noqa: BLE001 - candidate solution code can raise anything
             ok = False
         if not ok:
             return False
@@ -38,7 +57,8 @@ def build(d: Path, n_diff=3000):
     unordered = meta.get("unordered", False)
 
     def same(a, x, y):
-        if chk: return chk(a, x, None) and chk(a, y, None)
+        if chk:
+            return chk(a, x, None) and chk(a, y, None)
         return sorted(x) == sorted(y) if unordered else x == y
 
     rng = random.Random(1)
@@ -51,15 +71,20 @@ def build(d: Path, n_diff=3000):
     for s in SIZES:
         a = gen(rng, s)
         t = {"args": a, "expected": ref(*copy.deepcopy(a)), "n": s}
-        if unordered: t["unordered"] = True
-        if chk: assert chk(a, t["expected"], None), f"{meta['id']}: ref fails its own checker on {a}"
+        if unordered:
+            t["unordered"] = True
+        if chk:
+            assert chk(a, t["expected"], None), (
+                f"{meta['id']}: ref fails its own checker on {a}"
+            )
         tests.append(t)
-    
+
     wrong_dir = d / "wrong"
-    for w in (sorted(wrong_dir.glob("*.py")) if wrong_dir.is_dir() else []):
-        assert not passes(load(w).solve, tests, chk, unordered), \
+    for w in sorted(wrong_dir.glob("*.py")) if wrong_dir.is_dir() else []:
+        assert not passes(load(w).solve, tests, chk, unordered), (
             f"{meta['id']}: wrong solution {w.name} passes ALL tests, so the tests have a hole"
-    
+        )
+
     meta["tests"] = tests
     Path("problems").mkdir(exist_ok=True)
     Path(f"problems/{meta['id']}.json").write_text(json.dumps(meta))
@@ -72,7 +97,7 @@ if __name__ == "__main__":
         if d.is_dir():
             try:
                 build(d)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - report every broken problem, not just the first
                 bad.append(d.name)
                 print("FAILED", d.name, "-", e)
     if bad:

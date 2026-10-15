@@ -14,7 +14,12 @@ def solve(grid):
                     y, x = stack.pop()
                     for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                         ny, nx = y + dy, x + dx
-                        if 0 <= ny < rows and 0 <= nx < cols and grid[ny][nx] == 1 and not seen[ny][nx]:
+                        if (
+                            0 <= ny < rows
+                            and 0 <= nx < cols
+                            and grid[ny][nx] == 1
+                            and not seen[ny][nx]
+                        ):
                             seen[ny][nx] = True
                             stack.append((ny, nx))
     return count

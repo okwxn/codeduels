@@ -1,4 +1,7 @@
-import json, re, shutil, sys
+import json
+import re
+import shutil
+import sys
 from pathlib import Path
 
 FILES = {"meta.json", "ref.py", "brute.py", "gen.py", "check.py"}
@@ -6,11 +9,16 @@ WRONG = re.compile(r"[\w-]+/wrong_\d+\.py")
 force = "--force" in sys.argv
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 text = Path(args[0]).read_text() if args else sys.stdin.read()
-parts = re.split(r"^=== (\S+) ===\s*$", text, flags=re.M)
+parts = re.split(r"^=== (\S+) ===\s*$", text, flags=re.MULTILINE)
 
 
 def clean(body):
-    return "\n".join(l for l in body.strip().splitlines() if not l.strip().startswith("```")) + "\n"
+    return (
+        "\n".join(
+            l for l in body.strip().splitlines() if not l.strip().startswith("```")
+        )
+        + "\n"
+    )
 
 
 probs, wrongs, cur = [], [], None
