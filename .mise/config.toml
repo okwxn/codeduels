@@ -3,6 +3,7 @@ min_version = "2026.10.1"
 [tools]
 python = "3.14.8"
 uv = "0.13.1"
+github-cli = "2.102.0"
 
 [settings]
 lockfile = true
