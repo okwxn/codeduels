@@ -23,6 +23,8 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup
+        with:
+          tools: python uv
 
       - name: Lint & type check
         run: mise r check
@@ -48,7 +50,13 @@ jobs:
           grep -q "^ARG PYTHON_IMAGE=python:${py//./\\.}-slim@" Dockerfile || { echo "::error::Dockerfile Python image is not ${py}"; exit 1; }
           grep -q "^ARG UV_IMAGE=ghcr\\.io/astral-sh/uv:${uv//./\\.}@" Dockerfile || { echo "::error::Dockerfile uv image is not ${uv}"; exit 1; }
 
-      - name: Verify uv image attestation
+      # After the version check so its python3 is the runner's, not a mise shim
+      - uses: ./.github/actions/setup
+        with:
+          tools: github-cli
+          sync: "false"
+
+      - name: Verify uv image attestation (pinned gh)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
