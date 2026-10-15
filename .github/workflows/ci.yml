@@ -32,8 +32,6 @@ jobs:
     name: Docker image
     needs: check
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,8 +39,11 @@ jobs:
 
       - name: Check Dockerfile matches mise versions
         run: |
-          py=$(sed -n 's/^python = "\(.*\)"/\1/p' .mise/config.toml)
-          uv=$(sed -n 's/^uv = "\(.*\)"/\1/p' .mise/config.toml)
+          # Parse the TOML properly (string or { version = ... } table form)
+          ver() { python3 -c 'import sys, tomllib; t = tomllib.load(open(".mise/config.toml", "rb"))["tools"][sys.argv[1]]; print(t["version"] if isinstance(t, dict) else t)' "$1"; }
+          py=$(ver python)
+          uv=$(ver uv)
+          [ -n "$py" ] && [ -n "$uv" ] || { echo "::error::could not read python/uv versions from mise"; exit 1; }
           grep -q "^ARG PYTHON_IMAGE=python:${py}-slim@" Dockerfile || { echo "::error::Dockerfile Python image is not ${py}"; exit 1; }
           grep -q "^ARG UV_IMAGE=ghcr.io/astral-sh/uv:${uv}@" Dockerfile || { echo "::error::Dockerfile uv image is not ${uv}"; exit 1; }
 
