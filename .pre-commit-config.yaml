@@ -3,19 +3,26 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run --frozen ruff check --force-exclude
+        entry: uv run --locked ruff check --force-exclude
         language: system
         types_or: [python, pyi]
       - id: ruff-format
         name: ruff format --check
-        entry: uv run --frozen ruff format --check --force-exclude
+        entry: uv run --locked ruff format --check --force-exclude
         language: system
         types_or: [python, pyi]
       # ty needs the whole project to resolve imports, so it checks everything,
       # but only when a Python file is part of the commit
       - id: ty
         name: ty check
-        entry: uv run --frozen ty check .
+        entry: uv run --locked ty check .
         language: system
         types_or: [python, pyi]
+        pass_filenames: false
+      # Regenerate problems/ and fail if that changed anything (including new untracked files)
+      - id: gen
+        name: problems/ up to date
+        entry: bash -c 'uv run --locked python tools/gen_tests.py >/dev/null || exit 1; git diff --quiet problems/ && [ -z "$(git ls-files --others --exclude-standard problems/)" ] || { git status --short problems/; echo "problems/ is stale; stage the regenerated files"; exit 1; }'
+        language: system
+        files: ^(problems_src/|problems/|tools/gen_tests\.py$)
         pass_filenames: false
