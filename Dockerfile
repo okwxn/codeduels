@@ -15,8 +15,10 @@ FROM ${PYTHON_IMAGE} AS final
 RUN useradd --system --no-create-home app
 WORKDIR /app
 COPY --from=build /app/.venv ./.venv
-# Copy the app; .dockerignore keeps out tooling, sources and secrets
-COPY . .
+# Copy only what the app needs at runtime
+COPY main.py ./
+COPY problems ./problems
+COPY public ./public
 USER app
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8080
