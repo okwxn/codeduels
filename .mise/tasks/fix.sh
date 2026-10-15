@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 #MISE description="Fix linting and formatting issues"
 set -euo pipefail
-uv run ruff check . --fix && uv run ruff format .
+uv run --locked ruff check . --fix && uv run --locked ruff format .

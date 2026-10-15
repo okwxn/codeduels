@@ -2,7 +2,7 @@
 #MISE description="Lint/type check with ruff and ty"
 set -euo pipefail
 echo "Running ruff..."
-uv run ruff check .
-uv run ruff format --check .
+uv run --locked ruff check .
+uv run --locked ruff format --check .
 echo "Running ty..."
-uv run ty check .
+uv run --locked ty check .
