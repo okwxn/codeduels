@@ -49,8 +49,8 @@ jobs:
 
       - name: Check Dockerfile matches mise versions
         run: |
-          # Parse the TOML properly (string or { version = ... } table form)
-          ver() { python3 -c 'import sys, tomllib; t = tomllib.load(open(".mise/config.toml", "rb"))["tools"][sys.argv[1]]; print(t["version"] if isinstance(t, dict) else t)' "$1"; }
+          # Parse the TOML properly (string or { version = ... } table form); prints "" if missing
+          ver() { python3 -c 'import sys, tomllib; t = tomllib.load(open(".mise/config.toml", "rb"))["tools"].get(sys.argv[1], ""); print(t.get("version", "") if isinstance(t, dict) else t)' "$1"; }
           py=$(ver python)
           uv=$(ver uv)
           [ -n "$py" ] && [ -n "$uv" ] || { echo "::error::could not read python/uv versions from mise"; exit 1; }
