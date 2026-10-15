@@ -4,9 +4,9 @@
 
 # Local environments and caches
 .venv
-__pycache__
+**/__pycache__
 .ruff_cache
-.DS_Store
+**/.DS_Store
 
 # Repo tooling, not needed at runtime
 .git
