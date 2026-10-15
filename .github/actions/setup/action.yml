@@ -1,0 +1,19 @@
+name: Setup
+description: Install pinned tools with mise (verified against .mise/mise.lock) and sync dependencies
+
+runs:
+  using: composite
+  steps:
+    - name: Install tools (mise)
+      uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      env:
+        # Re-verify GitHub attestations on download instead of trusting mise.lock's record
+        MISE_LOCKED_VERIFY_PROVENANCE: "1"
+      with:
+        version: 2026.10.1
+        # Fail if a tool isn't in mise.lock (the action auto-adds this; explicit for clarity)
+        install_args: --locked
+
+    - name: Install dependencies
+      shell: bash
+      run: uv sync --locked
