@@ -11,4 +11,9 @@ slsa = true
 python.uv_venv_auto = "create|source"
 
 [hooks]
-enter = "uv sync --frozen -q && uv run --frozen pre-commit install > /dev/null"
+# --locked fails loudly if uv.lock is out of date with pyproject.toml (same as CI);
+# pre-commit is installed once, not on every cd
+enter = """
+uv sync --locked -q &&
+  { [ -f "$(git rev-parse --git-path hooks/pre-commit)" ] || uv run --locked pre-commit install; }
+"""
