@@ -9,7 +9,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --locked --no-dev
 
 FROM ${PYTHON_IMAGE} AS final
 RUN useradd --system --no-create-home app
@@ -22,4 +22,5 @@ COPY public ./public
 USER app
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8080
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# One worker only: rooms live in memory, and uvicorn would otherwise honour WEB_CONCURRENCY
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
