@@ -1,6 +1,14 @@
 name: Setup
 description: Install pinned tools with mise (verified against .mise/mise.lock) and sync dependencies
 
+inputs:
+  tools:
+    description: Space-separated mise tools to install (default all)
+    default: ""
+  sync:
+    description: Run uv sync (needs python and uv)
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -12,8 +20,9 @@ runs:
       with:
         version: 2026.10.1
         # Fail if a tool isn't in mise.lock (the action auto-adds this; explicit for clarity)
-        install_args: --locked
+        install_args: --locked ${{ inputs.tools }}
 
     - name: Install dependencies
+      if: inputs.sync == 'true'
       shell: bash
       run: uv sync --locked

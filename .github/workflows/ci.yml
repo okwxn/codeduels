@@ -9,28 +9,36 @@ on:
 permissions:
   contents: read
 
+# PRs share a group per branch so new pushes cancel stale runs; main groups per commit so
+# a queued run is never dropped and every main commit gets a result
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: Lint & type check
     runs-on: ubuntu-latest
+    env:
+      # Stop mise r from installing tools left out of the setup step below (e.g. github-cli)
+      MISE_TASK_RUN_AUTO_INSTALL: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - uses: ./.github/actions/setup
+        with:
+          tools: python uv
 
       - name: Lint & type check
         run: mise r check
 
       - name: Check problems/ is up to date with problems_src/
-        run: |
-          mise r gen
-          git diff --exit-code problems/ || { echo "::error::problems/ is stale; run 'mise r gen' and commit"; exit 1; }
+        run: mise r gen --check
 
   docker:
     name: Docker image
-    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,10 +52,16 @@ jobs:
           py=$(ver python)
           uv=$(ver uv)
           [ -n "$py" ] && [ -n "$uv" ] || { echo "::error::could not read python/uv versions from mise"; exit 1; }
-          grep -q "^ARG PYTHON_IMAGE=python:${py}-slim@" Dockerfile || { echo "::error::Dockerfile Python image is not ${py}"; exit 1; }
-          grep -q "^ARG UV_IMAGE=ghcr.io/astral-sh/uv:${uv}@" Dockerfile || { echo "::error::Dockerfile uv image is not ${uv}"; exit 1; }
+          grep -q "^ARG PYTHON_IMAGE=python:${py//./\\.}-slim@" Dockerfile || { echo "::error::Dockerfile Python image is not ${py}"; exit 1; }
+          grep -q "^ARG UV_IMAGE=ghcr\\.io/astral-sh/uv:${uv//./\\.}@" Dockerfile || { echo "::error::Dockerfile uv image is not ${uv}"; exit 1; }
 
-      - name: Verify uv image attestation
+      # After the version check so its python3 is the runner's, not a mise shim
+      - uses: ./.github/actions/setup
+        with:
+          tools: github-cli
+          sync: "false"
+
+      - name: Verify uv image attestation (pinned gh)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -63,7 +77,8 @@ jobs:
           load: true
           tags: codeduels:ci
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Only main writes the cache so PR branches can't evict it
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
 
       - name: Smoke test image
         run: .github/scripts/docker-smoke.sh codeduels:ci

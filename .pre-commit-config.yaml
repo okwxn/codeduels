@@ -3,19 +3,27 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run --frozen ruff check --force-exclude
+        entry: uv run --locked ruff check --force-exclude
         language: system
         types_or: [python, pyi]
       - id: ruff-format
         name: ruff format --check
-        entry: uv run --frozen ruff format --check --force-exclude
+        entry: uv run --locked ruff format --check --force-exclude
         language: system
         types_or: [python, pyi]
       # ty needs the whole project to resolve imports, so it checks everything,
       # but only when a Python file is part of the commit
       - id: ty
         name: ty check
-        entry: uv run --frozen ty check .
+        entry: uv run --locked ty check .
         language: system
         types_or: [python, pyi]
+        pass_filenames: false
+      # Rebuild problems/ from the index and fail if it's stale. Only runs when a
+      # related file is staged; pre-commit skips deletions, so CI catches those
+      - id: gen
+        name: problems/ up to date
+        entry: uv run --locked python tools/gen_tests.py --check
+        language: system
+        files: ^(problems_src/|problems/|tools/gen_tests\.py$)
         pass_filenames: false
