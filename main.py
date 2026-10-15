@@ -1,13 +1,18 @@
-import asyncio, json, random, secrets, time
+import asyncio
+import json
+import random
+import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 PROBLEMS = [json.loads(f.read_text()) for f in sorted(Path("problems").glob("*.json"))]
-rooms: dict[str, "Room"] = {}
+rooms: dict[str, Room] = {}
 
 
 class CreateReq(BaseModel):
@@ -16,9 +21,9 @@ class CreateReq(BaseModel):
     minutes: int = 10
     max_players: int = 2
     n_problems: int = 1
-    end_mode: str = "grace"   # first | grace | timer
+    end_mode: str = "grace"  # first | grace | timer
     grace: int = 120
-    scoring: str = "speed"    # speed | tests | steps | space
+    scoring: str = "speed"  # speed | tests | steps | space
 
 
 class Room:
@@ -27,9 +32,13 @@ class Room:
         self.minutes = min(max(c.minutes, 1), 30)
         self.max_players = min(max(c.max_players, 2), 6)
         self.n = min(max(c.n_problems, 1), len(pool), 5)
-        self.end_mode = c.end_mode if c.end_mode in ("first", "grace", "timer") else "grace"
+        self.end_mode = (
+            c.end_mode if c.end_mode in ("first", "grace", "timer") else "grace"
+        )
         self.grace = min(max(c.grace, 10), 600)
-        self.scoring = c.scoring if c.scoring in ("speed", "tests", "steps", "space") else "speed"
+        self.scoring = (
+            c.scoring if c.scoring in ("speed", "tests", "steps", "space") else "speed"
+        )
         self.problems, self.state = [], "lobby"
         self.host: str | None = None
         self.players: dict[str, dict] = {}
@@ -44,11 +53,15 @@ class Room:
         vs = list(p["prog"].values())
         sv = [v for v in vs if v["solved"]]
         slopes = [v["slope"] for v in sv if v["slope"] is not None]
-        return {"solved": len(sv), "passed": sum(v["passed"] for v in vs),
-                "at": sum(v["at"] for v in sv), "steps": sum(v["steps"] for v in sv),
-                "space": max([v["space"] for v in sv], default=-1),
-                "slope": max(slopes) if slopes else None,
-                "attempts": sum(v["attempts"] for v in vs)}
+        return {
+            "solved": len(sv),
+            "passed": sum(v["passed"] for v in vs),
+            "at": sum(v["at"] for v in sv),
+            "steps": sum(v["steps"] for v in sv),
+            "space": max([v["space"] for v in sv], default=-1),
+            "slope": max(slopes) if slopes else None,
+            "attempts": sum(v["attempts"] for v in vs),
+        }
 
     def rank_key(self, s):
         if self.scoring == "tests":
@@ -60,19 +73,43 @@ class Room:
         return (-s["solved"], s["at"])
 
     def snap(self):
-        rows = [{"id": i, "name": p["name"], "online": p["ws"] is not None, **self.stats(p),
-                 "prog": {k: {"passed": v["passed"], "total": v["total"], "solved": v["solved"]}
-                          for k, v in p["prog"].items()}}
-                for i, p in self.players.items()]
+        rows = [
+            {
+                "id": i,
+                "name": p["name"],
+                "online": p["ws"] is not None,
+                **self.stats(p),
+                "prog": {
+                    k: {
+                        "passed": v["passed"],
+                        "total": v["total"],
+                        "solved": v["solved"],
+                    }
+                    for k, v in p["prog"].items()
+                },
+            }
+            for i, p in self.players.items()
+        ]
         rows.sort(key=self.rank_key)
-        return {"type": "state", "state": self.state, "hostId": self.host, "round": self.round,
-                "reason": self.reason,
-                "remainingMs": max(0, int((self.ends_at - time.time()) * 1000)),
-                "players": rows,
-                "problems": self.problems if self.state != "lobby" else None,
-                "timeline": self.events if self.state == "finished" else [],
-                "cfg": {"max": self.max_players, "n": self.n, "endMode": self.end_mode,
-                        "grace": self.grace, "scoring": self.scoring, "minutes": self.minutes}}
+        return {
+            "type": "state",
+            "state": self.state,
+            "hostId": self.host,
+            "round": self.round,
+            "reason": self.reason,
+            "remainingMs": max(0, int((self.ends_at - time.time()) * 1000)),
+            "players": rows,
+            "problems": self.problems if self.state != "lobby" else None,
+            "timeline": self.events if self.state == "finished" else [],
+            "cfg": {
+                "max": self.max_players,
+                "n": self.n,
+                "endMode": self.end_mode,
+                "grace": self.grace,
+                "scoring": self.scoring,
+                "minutes": self.minutes,
+            },
+        }
 
     # ---- messaging ----
     async def send_all(self, msg):
@@ -82,7 +119,7 @@ class Room:
             if p["ws"]:
                 try:
                     await p["ws"].send_text(data)
-                except Exception:
+                except Exception:  # noqa: BLE001 - any send failure means the socket is dead
                     p["ws"] = None
 
     async def broadcast(self):
@@ -96,7 +133,9 @@ class Room:
     def _arm(self):
         if self.timer:
             self.timer.cancel()
-        self.timer = asyncio.create_task(self._timeout(max(0, self.ends_at - time.time())))
+        self.timer = asyncio.create_task(
+            self._timeout(max(0, self.ends_at - time.time()))
+        )
 
     async def _timeout(self, delay):
         await asyncio.sleep(delay)
@@ -113,7 +152,9 @@ class Room:
     async def start(self):
         prev = {p["id"] for p in self.problems}
         fresh = [p for p in self.pool if p["id"] not in prev]
-        self.problems = random.sample(fresh if len(fresh) >= self.n else self.pool, self.n)
+        self.problems = random.sample(
+            fresh if len(fresh) >= self.n else self.pool, self.n
+        )
         for p in self.players.values():
             p["prog"] = {}
         self.round += 1
@@ -132,7 +173,7 @@ class Room:
         try:
             passed, steps, space = int(passed), max(0, int(steps)), max(-1, int(space))
             slope = None if slope is None else float(slope)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return
         if slope is not None and not -1 <= slope <= 6:  # also rejects NaN
             slope = None
@@ -140,8 +181,19 @@ class Room:
         total = len(pr["tests"])
         passed = min(max(passed, 0), total)
         p = self.players[pid]
-        v = p["prog"].setdefault(idx, {"passed": 0, "total": total, "solved": False, "at": 0,
-                                       "steps": 0, "space": -1, "slope": None, "attempts": 0})
+        v = p["prog"].setdefault(
+            idx,
+            {
+                "passed": 0,
+                "total": total,
+                "solved": False,
+                "at": 0,
+                "steps": 0,
+                "space": -1,
+                "slope": None,
+                "attempts": 0,
+            },
+        )
         if v["solved"]:
             return
         v["attempts"] += 1
@@ -151,7 +203,9 @@ class Room:
             v["at"] = int((time.time() - self.started_at) * 1000)
             await self.say(f"{p['name']} solved {pr['title']} in {v['at'] / 1000:.0f}s")
         else:
-            await self.say(f"{p['name']} submitted {pr['title']}: {passed} of {total} tests")
+            await self.say(
+                f"{p['name']} submitted {pr['title']}: {passed} of {total} tests"
+            )
         await self.check_end(pid)
 
     async def check_end(self, pid):
@@ -166,7 +220,9 @@ class Room:
             if self.end_mode == "grace":
                 self.ends_at = min(self.ends_at, time.time() + self.grace)
                 self._arm()
-                await self.say(f"{name} finished. {self.grace} seconds left for everyone else")
+                await self.say(
+                    f"{name} finished. {self.grace} seconds left for everyone else"
+                )
         await self.broadcast()
 
 
@@ -192,10 +248,16 @@ app = FastAPI(lifespan=lifespan)
 def create_room(req: CreateReq):
     if len(rooms) >= 200:
         return JSONResponse({"error": "Server busy, try later"}, status_code=429)
-    pool = [p for p in PROBLEMS if p["difficulty"] in req.difficulties
-            and (not req.topics or set(p["tags"]) & set(req.topics))]
+    pool = [
+        p
+        for p in PROBLEMS
+        if p["difficulty"] in req.difficulties
+        and (not req.topics or set(p["tags"]) & set(req.topics))
+    ]
     if not pool:
-        return JSONResponse({"error": "No problems match those filters"}, status_code=400)
+        return JSONResponse(
+            {"error": "No problems match those filters"}, status_code=400
+        )
     code = secrets.token_hex(3)
     rooms[code] = Room(pool, req)
     return {"code": code}
@@ -232,19 +294,31 @@ async def ws_endpoint(ws: WebSocket, room: str, pid: str, name: str = "anon"):
             try:
                 m = json.loads(await ws.receive_text())
                 t = m.get("type")
-            except (json.JSONDecodeError, AttributeError):
+            except json.JSONDecodeError, AttributeError:
                 continue
-            if t == "start" and pid == r.host and r.state != "running" and len(r.players) >= 2:
+            if (
+                t == "start"
+                and pid == r.host
+                and r.state != "running"
+                and len(r.players) >= 2
+            ):
                 await r.start()
             elif t == "result":
-                await r.result(pid, m.get("idx"), m.get("passed", 0), m.get("steps", 0),
-                               m.get("space", -1), m.get("slope"))
+                await r.result(
+                    pid,
+                    m.get("idx"),
+                    m.get("passed", 0),
+                    m.get("steps", 0),
+                    m.get("space", -1),
+                    m.get("slope"),
+                )
     except WebSocketDisconnect:
         pass
     finally:
         if p["ws"] is ws:
             p["ws"] = None
         await r.broadcast()
+
 
 @app.get("/api/topics")
 def topics():
@@ -253,5 +327,6 @@ def topics():
         for t in p["tags"]:
             counts[t] = counts.get(t, 0) + 1
     return counts
+
 
 app.mount("/", StaticFiles(directory="public", html=True), name="static")  # keep LAST

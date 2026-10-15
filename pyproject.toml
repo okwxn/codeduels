@@ -6,3 +6,14 @@ dependencies = [
     "fastapi>=0.143.0",
     "uvicorn[standard]>=0.54.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.7.0",
+    "ruff>=0.17.1",
+    "ty>=0.0.88",
+]
+
+[tool.ruff.lint]
+# BLE: flag bare `except Exception`; RUF100: flag stale noqa comments
+extend-select = ["BLE", "RUF100"]

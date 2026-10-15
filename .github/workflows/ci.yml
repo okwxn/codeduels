@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint & type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Lint & type check
+        run: mise r check
+
+      - name: Check problems/ is up to date with problems_src/
+        run: |
+          mise r gen
+          git diff --exit-code problems/ || { echo "::error::problems/ is stale; run 'mise r gen' and commit"; exit 1; }
+
+  docker:
+    name: Docker image
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check Dockerfile matches mise versions
+        run: |
+          # Parse the TOML properly (string or { version = ... } table form)
+          ver() { python3 -c 'import sys, tomllib; t = tomllib.load(open(".mise/config.toml", "rb"))["tools"][sys.argv[1]]; print(t["version"] if isinstance(t, dict) else t)' "$1"; }
+          py=$(ver python)
+          uv=$(ver uv)
+          [ -n "$py" ] && [ -n "$uv" ] || { echo "::error::could not read python/uv versions from mise"; exit 1; }
+          grep -q "^ARG PYTHON_IMAGE=python:${py}-slim@" Dockerfile || { echo "::error::Dockerfile Python image is not ${py}"; exit 1; }
+          grep -q "^ARG UV_IMAGE=ghcr.io/astral-sh/uv:${uv}@" Dockerfile || { echo "::error::Dockerfile uv image is not ${uv}"; exit 1; }
+
+      - name: Verify uv image attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref=$(sed -n 's/^ARG UV_IMAGE=//p' Dockerfile)
+          gh attestation verify "oci://${ref%%:*}@${ref##*@}" --repo astral-sh/uv
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: codeduels:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: .github/scripts/docker-smoke.sh codeduels:ci

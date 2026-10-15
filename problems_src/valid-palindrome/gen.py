@@ -3,7 +3,7 @@ def gen(rng, size):
     core = half + rng.choice(["", "a", "Z", "7"]) + half[::-1]
     if core and rng.random() < 0.5:  # sometimes break the palindrome
         i = rng.randrange(len(core))
-        core = core[:i] + rng.choice("abAB12xy") + core[i + 1:]
+        core = core[:i] + rng.choice("abAB12xy") + core[i + 1 :]
     out = []
     for c in core:
         out.append(c.swapcase() if rng.random() < 0.3 else c)
