@@ -2,15 +2,18 @@
 # Start a built image and check it serves the page, the problems and room creation.
 set -euo pipefail
 image=$1
-base=http://localhost:18080
 
-id=$(docker run -d -e PORT=8080 -p 18080:8080 "$image")
+# Create first and trap before starting, so a failed start is still cleaned up
+id=$(docker create -e PORT=8080 -p 127.0.0.1::8080 "$image")
 cleanup() {
   local rc=$?
   [ "$rc" -ne 0 ] && docker logs "$id"
   docker rm -f "$id" >/dev/null
 }
 trap cleanup EXIT
+docker start "$id" >/dev/null
+# Let Docker pick a free host port
+base=http://$(docker port "$id" 8080/tcp | head -n1)
 
 ready=
 for _ in $(seq 30); do
