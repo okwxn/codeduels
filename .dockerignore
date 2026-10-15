@@ -1,5 +1,22 @@
+# Secrets
+.env
+.env.*
+
+# Local environments and caches
 .venv
 __pycache__
+.ruff_cache
+.DS_Store
+
+# Repo tooling, not needed at runtime
 .git
+.github
+.mise
+.claude
+.pre-commit-config.yaml
+.dockerignore
+.gitignore
+Dockerfile
+README.md
 problems_src
 tools
