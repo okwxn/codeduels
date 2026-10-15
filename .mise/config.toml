@@ -1,0 +1,14 @@
+min_version = "2026.10.1"
+
+[tools]
+python = "3.14.8"
+uv = "0.13.1"
+
+[settings]
+lockfile = true
+github_attestations = true
+slsa = true
+python.uv_venv_auto = "create|source"
+
+[hooks]
+enter = "uv sync --frozen -q && uv run --frozen pre-commit install > /dev/null"
