@@ -13,8 +13,10 @@ python.uv_venv_auto = "create|source"
 
 [hooks]
 # --locked fails loudly if uv.lock is out of date with pyproject.toml (same as CI);
-# pre-commit is installed once, not on every cd
+# pre-commit is installed once, not on every cd; skipped (pre-commit refuses) if core.hooksPath is set
 enter = """
 uv sync --locked -q &&
-  { [ -f "$(git rev-parse --git-path hooks/pre-commit)" ] || uv run --locked pre-commit install; }
+  { [ -f "$(git rev-parse --git-path hooks/pre-commit)" ] ||
+    { git config core.hooksPath >/dev/null && echo "mise: core.hooksPath is set, skipping pre-commit install" >&2; } ||
+    uv run --locked pre-commit install; }
 """
