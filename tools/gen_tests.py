@@ -89,16 +89,22 @@ def build(d: Path, n_diff=3000):
     Path("problems").mkdir(exist_ok=True)
     Path(f"problems/{meta['id']}.json").write_text(json.dumps(meta))
     print("ok", meta["id"], len(tests), "tests")
+    return meta["id"]
 
 
 if __name__ == "__main__":
-    bad = []
+    bad, ids = [], set()
     for d in sorted(Path("problems_src").iterdir()):
         if d.is_dir():
             try:
-                build(d)
+                ids.add(build(d))
             except Exception as e:  # noqa: BLE001 - report every broken problem, not just the first
                 bad.append(d.name)
                 print("FAILED", d.name, "-", e)
     if bad:
         raise SystemExit(f"failed: {bad}")
+    # drop outputs whose source was removed or renamed
+    for f in Path("problems").glob("*.json"):
+        if f.stem not in ids:
+            f.unlink()
+            print("removed", f.name)

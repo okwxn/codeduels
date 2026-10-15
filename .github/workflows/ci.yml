@@ -26,7 +26,7 @@ jobs:
       - name: Check problems/ is up to date with problems_src/
         run: |
           mise r gen
-          git diff --exit-code problems/ || { echo "::error::problems/ is stale; run 'mise r gen' and commit"; exit 1; }
+          [ -z "$(git status --porcelain problems/)" ] || { git status --short problems/; echo "::error::problems/ is stale; run 'mise r gen' and commit"; exit 1; }
 
   docker:
     name: Docker image
