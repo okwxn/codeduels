@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: Lint & type check
@@ -30,7 +34,6 @@ jobs:
 
   docker:
     name: Docker image
-    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,7 +66,8 @@ jobs:
           load: true
           tags: codeduels:ci
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Only main writes the cache so PR branches can't evict it
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
 
       - name: Smoke test image
         run: .github/scripts/docker-smoke.sh codeduels:ci
