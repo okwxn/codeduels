@@ -5,6 +5,7 @@ import os
 import random
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SIZES = [
@@ -89,53 +90,94 @@ def build(d: Path, n_diff=3000):
         )
 
     meta["tests"] = tests
-    Path("problems").mkdir(exist_ok=True)
-    Path(f"problems/{meta['id']}.json").write_text(json.dumps(meta))
     print("ok", meta["id"], len(tests), "tests")
-    return meta["id"]
+    return meta
 
 
-def git(*args):
+def git(*args, stdin=None):
     return subprocess.run(
-        ["git", *args], capture_output=True, text=True, check=True
+        ["git", *args], input=stdin, capture_output=True, text=True, check=True
     ).stdout
 
 
-if __name__ == "__main__":
-    # --check (pre-commit and CI): build only git-tracked sources so untracked work in
-    # progress is ignored, then fail if problems/ no longer matches the index
-    check = "--check" in sys.argv[1:]
-    srcs = sorted(d for d in Path("problems_src").iterdir() if d.is_dir())
-    outs = sorted(Path("problems").glob("*.json"))
-    if check:
-        tracked = set(git("ls-files", "problems_src", "problems").splitlines())
-        srcs = [
-            d for d in srcs if any(t.startswith(f"{d.as_posix()}/") for t in tracked)
-        ]
-        outs = [f for f in outs if f.as_posix() in tracked]
-    bad, ids = [], {}
-    for d in srcs:
+def ls_files(*paths):
+    return git("ls-files", "-z", "--", *paths).split("\0")[:-1]
+
+
+def build_all(src: Path):
+    """Build every problem folder under src; returns {id: json} for the ones that passed."""
+    out, origin, bad = {}, {}, []
+    for d in sorted(src.iterdir()) if src.is_dir() else []:
+        if not d.is_dir():
+            continue
         try:
-            i = build(d)
-            if i in ids:
-                raise ValueError(f"id {i!r} is also used by {ids[i]}")
-            ids[i] = d.name
+            meta = build(d)
+            if meta["id"] in origin:
+                raise ValueError(
+                    f"id {meta['id']!r} is also used by {origin[meta['id']]}"
+                )
         except Exception as e:  # noqa: BLE001 - report every broken problem, not just the first
             bad.append(d.name)
             print("FAILED", d.name, "-", e)
+            continue
+        origin[meta["id"]] = d.name
+        out[meta["id"]] = json.dumps(meta)
+    return out, bad
+
+
+def check():
+    """Rebuild from the git index in a temp dir and compare to the indexed problems/.
+
+    Read-only: ignores untracked and unstaged files and never touches the working tree.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        git(
+            "checkout-index",
+            "-z",
+            "--stdin",
+            f"--prefix={tmp}/",
+            stdin="".join(f + "\0" for f in ls_files("problems_src", "problems")),
+        )
+        built, bad = build_all(Path(tmp, "problems_src"))
+        if bad:
+            raise SystemExit(f"failed: {bad}")
+        committed = {
+            f.stem: f.read_text() for f in Path(tmp, "problems").glob("*.json")
+        }
+    stale = sorted(
+        i for i in built.keys() | committed.keys() if built.get(i) != committed.get(i)
+    )
+    if stale:
+        for i in stale:
+            if i not in committed:
+                print("missing:", f"problems/{i}.json")
+            elif i not in built:
+                print("orphaned:", f"problems/{i}.json")
+            else:
+                print("outdated:", f"problems/{i}.json")
+        err = "::error::" if os.environ.get("GITHUB_ACTIONS") else ""
+        raise SystemExit(
+            f"{err}problems/ is stale; run 'mise r gen' and stage the result"
+        )
+
+
+def generate():
+    built, bad = build_all(Path("problems_src"))
+    Path("problems").mkdir(exist_ok=True)
+    for i, text in built.items():
+        Path(f"problems/{i}.json").write_text(text)
     if bad:
         raise SystemExit(f"failed: {bad}")
-    # drop outputs whose source was removed or renamed
-    for f in outs:
-        if f.stem not in ids:
-            f.unlink()
+    # drop tracked outputs whose source was removed or renamed; untracked files are left alone
+    for f in map(Path, ls_files("problems")):
+        if f.parent == Path("problems") and f.suffix == ".json" and f.stem not in built:
+            f.unlink(missing_ok=True)
             print("removed", f.name)
-    if check:
-        changed = subprocess.call(["git", "diff", "--quiet", "problems/"]) != 0
-        untracked = [i for i in ids if f"problems/{i}.json" not in tracked]
-        if changed or untracked:
-            print(git("status", "--short", "problems/"), end="")
-            err = "::error::" if os.environ.get("GITHUB_ACTIONS") else ""
-            raise SystemExit(
-                f"{err}problems/ is stale; run 'mise r gen' and stage the result"
-            )
+
+
+if __name__ == "__main__":
+    # --check (pre-commit and CI): fail if problems/ in the index is stale
+    if "--check" in sys.argv[1:]:
+        check()
+    else:
+        generate()
