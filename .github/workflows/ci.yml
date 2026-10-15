@@ -28,9 +28,7 @@ jobs:
         run: mise r check
 
       - name: Check problems/ is up to date with problems_src/
-        run: |
-          mise r gen
-          [ -z "$(git status --porcelain problems/)" ] || { git status --short problems/; echo "::error::problems/ is stale; run 'mise r gen' and commit"; exit 1; }
+        run: mise r gen --check
 
   docker:
     name: Docker image

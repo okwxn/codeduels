@@ -19,10 +19,11 @@ repos:
         language: system
         types_or: [python, pyi]
         pass_filenames: false
-      # Regenerate problems/ and fail if that changed anything (including new untracked files)
+      # Regenerate problems/ from tracked sources and fail if that changed anything.
+      # Runs on every commit (~0.3s) since pre-commit doesn't match deleted files
       - id: gen
         name: problems/ up to date
-        entry: bash -c 'uv run --locked python tools/gen_tests.py >/dev/null || exit 1; git diff --quiet problems/ && [ -z "$(git ls-files --others --exclude-standard problems/)" ] || { git status --short problems/; echo "problems/ is stale; stage the regenerated files"; exit 1; }'
+        entry: uv run --locked python tools/gen_tests.py --check
         language: system
-        files: ^(problems_src/|problems/|tools/gen_tests\.py$)
+        always_run: true
         pass_filenames: false
