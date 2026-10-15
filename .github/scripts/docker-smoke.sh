@@ -17,19 +17,19 @@ base=http://$(docker port "$id" 8080/tcp | head -n1)
 
 ready=
 for _ in $(seq 30); do
-  if curl -sf "$base/api/topics" >/dev/null; then ready=1; break; fi
+  if curl -sf --max-time 5 "$base/api/topics" >/dev/null; then ready=1; break; fi
   [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] || { echo "container exited during startup"; exit 1; }
   sleep 1
 done
 [ -n "$ready" ] || { echo "server not ready after 30s"; exit 1; }
 
-page=$(curl -sf "$base/")
+page=$(curl -sf --max-time 5 "$base/")
 grep -q "<title>CodeDuels</title>" <<<"$page" || { echo "index page missing"; exit 1; }
 
-topics=$(curl -sf "$base/api/topics")
+topics=$(curl -sf --max-time 5 "$base/api/topics")
 [ "$topics" != "{}" ] || { echo "no problems loaded"; exit 1; }
 
-room=$(curl -sf -X POST -H 'content-type: application/json' -d '{}' "$base/api/rooms")
+room=$(curl -sf --max-time 5 -X POST -H 'content-type: application/json' -d '{}' "$base/api/rooms")
 grep -q '"code"' <<<"$room" || { echo "room creation failed: $room"; exit 1; }
 
 [ "$(docker exec "$id" whoami)" = app ] || { echo "container not running as app user"; exit 1; }

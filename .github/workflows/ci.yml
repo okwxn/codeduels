@@ -19,6 +19,7 @@ jobs:
   check:
     name: Lint & type check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       # Stop mise r from installing tools left out of the setup step below (e.g. github-cli)
       MISE_TASK_RUN_AUTO_INSTALL: "0"
@@ -40,6 +41,7 @@ jobs:
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,13 +49,23 @@ jobs:
 
       - name: Check Dockerfile matches mise versions
         run: |
-          # Parse the TOML properly (string or { version = ... } table form)
-          ver() { python3 -c 'import sys, tomllib; t = tomllib.load(open(".mise/config.toml", "rb"))["tools"][sys.argv[1]]; print(t["version"] if isinstance(t, dict) else t)' "$1"; }
+          # Parse the TOML properly (string or { version = ... } table form); prints "" if missing
+          ver() { python3 -c 'import sys, tomllib; t = tomllib.load(open(".mise/config.toml", "rb"))["tools"].get(sys.argv[1], ""); print(t.get("version", "") if isinstance(t, dict) else t)' "$1"; }
           py=$(ver python)
           uv=$(ver uv)
           [ -n "$py" ] && [ -n "$uv" ] || { echo "::error::could not read python/uv versions from mise"; exit 1; }
           grep -q "^ARG PYTHON_IMAGE=python:${py//./\\.}-slim@" Dockerfile || { echo "::error::Dockerfile Python image is not ${py}"; exit 1; }
           grep -q "^ARG UV_IMAGE=ghcr\\.io/astral-sh/uv:${uv//./\\.}@" Dockerfile || { echo "::error::Dockerfile uv image is not ${uv}"; exit 1; }
+
+      # Docker pulls by digest and ignores the tag, so check the digest's own metadata matches it
+      # (comparing against the tag's current digest would break whenever upstream rebuilds the tag)
+      - name: Check pinned digests are the versions they claim
+        run: |
+          inspect() { ref=$(sed -n "s/^ARG $1=//p" Dockerfile); docker buildx imagetools inspect "${ref%%:*}@${ref##*@}" --format '{{json .Image}}'; }
+          py=$(inspect PYTHON_IMAGE | python3 -c 'import sys, json; d = json.load(sys.stdin); c = d.get("linux/amd64", d)["config"]; print(next((e.split("=", 1)[1] for e in c.get("Env", []) if e.startswith("PYTHON_VERSION=")), ""))')
+          uv=$(inspect UV_IMAGE | python3 -c 'import sys, json; d = json.load(sys.stdin); c = d.get("linux/amd64", d)["config"]; print((c.get("Labels") or {}).get("org.opencontainers.image.version", ""))')
+          grep -q "^ARG PYTHON_IMAGE=python:${py//./\\.}-slim@" Dockerfile || { echo "::error::Python digest is ${py:-unknown}, not the tagged version"; exit 1; }
+          grep -q "^ARG UV_IMAGE=ghcr\\.io/astral-sh/uv:${uv//./\\.}@" Dockerfile || { echo "::error::uv digest is ${uv:-unknown}, not the tagged version"; exit 1; }
 
       # After the version check so its python3 is the runner's, not a mise shim
       - uses: ./.github/actions/setup
