@@ -35,6 +35,9 @@ jobs:
       - name: Lint & type check
         run: mise r check
 
+      - name: Test
+        run: mise r test
+
       - name: Check problems/ is up to date with problems_src/
         run: mise r gen --check
 

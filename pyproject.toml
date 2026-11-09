@@ -9,10 +9,16 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
     "ruff>=0.17.1",
     "ty>=0.0.88",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff.lint]
 # BLE: flag bare `except Exception`; RUF100: flag stale noqa comments
