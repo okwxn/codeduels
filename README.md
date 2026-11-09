@@ -32,10 +32,12 @@ Open the match link in an incognito window as the second player (same browser = 
 
 ## Development
 ```bash
-mise tasks      # list all tasks
-mise r check    # ruff lint + format check, ty type check
-mise r fix      # ruff autofix + format
-mise r build    # docker build (uses the Dockerfile's pinned images, not mise's)
+mise tasks           # list all tasks
+mise r check         # ruff lint + format check, ty type check
+mise r test          # pytest suite
+mise r fix           # ruff autofix + format
+mise r gen --check   # fail if problems/*.json is stale
+mise r build         # docker build (uses the Dockerfile's pinned images, not mise's)
 ```
 Tasks live in `.mise/tasks/`. Pre-commit hooks (ruff + ty) are installed automatically when you enter the repo.
 
@@ -44,15 +46,17 @@ Tasks live in `.mise/tasks/`. Pre-commit hooks (ruff + ty) are installed automat
 2. Copy the reply, then run `mise r add`
 3. Restart `mise r dev`, commit, push
 
-`tools/gen_tests.py` generates the tests from `ref.py` and `gen.py`, and fails if `ref.py` and `brute.py` disagree on random inputs.
+`tools/gen_tests.py` generates the tests from `ref.py` and `gen.py`, fails if `ref.py` and `brute.py` disagree on random inputs, and fails if a `wrong/*.py` solution passes every test. See [docs/ADDING_PROBLEMS.md](docs/ADDING_PROBLEMS.md) for the file formats.
 
 ```
-problems_src/<id>/   meta.json, ref.py, brute.py, gen.py, check.py?
+problems_src/<id>/   meta.json, ref.py, brute.py, gen.py, check.py?, wrong/*.py?
 problems/<id>.json   generated, committed, loaded by the server
 tools/               gen_tests.py, new_problem.py
 .mise/               tool versions + tasks
 public/              index.html, worker.js
 server/              FastAPI app: routes, rooms, scoring
+tests/               pytest suite
+docs/                architecture, adding problems
 ```
 
 ## Deploy
@@ -66,6 +70,11 @@ Base images are pinned by digest in the `Dockerfile`; when bumping Python/uv in 
 - Rooms are in memory, so a restart, sleep, or deploy ends all matches. Run a single instance and a single uvicorn process.
 - Steps count executed lines of your code, so builtins like `sorted()` count as one. Memory and growth are rough estimates.
 - Python only. No linked-list, tree, or design problems yet.
+
+## Docs
+- [Architecture](docs/ARCHITECTURE.md)
+- [Adding problems](docs/ADDING_PROBLEMS.md)
+- [Contributor and AI agent guide](AGENTS.md)
 
 ---
 🤖 **Note:** This project was developed with the assistance of Claude Code.
