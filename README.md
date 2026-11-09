@@ -52,7 +52,7 @@ problems/<id>.json   generated, committed, loaded by the server
 tools/               gen_tests.py, new_problem.py
 .mise/               tool versions + tasks
 public/              index.html, worker.js
-main.py              server, rooms, scoring
+server/              FastAPI app: routes, rooms, scoring
 ```
 
 ## Deploy

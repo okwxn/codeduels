@@ -16,11 +16,11 @@ RUN useradd --system --no-create-home app
 WORKDIR /app
 COPY --from=build /app/.venv ./.venv
 # Copy only what the app needs at runtime
-COPY main.py ./
+COPY server ./server
 COPY problems ./problems
 COPY public ./public
 USER app
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8080
 # One worker only: rooms live in memory, and uvicorn would otherwise honour WEB_CONCURRENCY
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
+CMD ["sh", "-c", "exec uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
