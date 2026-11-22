@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from .config import PUBLIC_DIR
+from .config import JUDGE_DIR, PUBLIC_DIR
 from .registry import gc_loop
 from .routes import router
 
@@ -18,4 +18,5 @@ async def lifespan(_):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(router)
+app.mount("/judge", StaticFiles(directory=JUDGE_DIR), name="judge")
 app.mount("/", StaticFiles(directory=PUBLIC_DIR, html=True), name="static")  # keep LAST

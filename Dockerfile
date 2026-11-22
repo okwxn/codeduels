@@ -17,6 +17,7 @@ WORKDIR /app
 COPY --from=build /app/.venv ./.venv
 # Copy only what the app needs at runtime
 COPY server ./server
+COPY judge ./judge
 COPY problems ./problems
 COPY public ./public
 USER app
