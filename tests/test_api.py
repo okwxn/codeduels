@@ -46,3 +46,9 @@ def test_two_players_join_and_start(client):
 def test_unknown_room(client):
     with client.websocket_connect("/ws?room=nope&pid=a&name=A") as ws:
         assert ws.receive_json()["type"] == "gone"
+
+
+def test_harness_is_served(client):
+    r = client.get("/judge/harness.py")
+    assert r.status_code == 200
+    assert "def run_judge" in r.text
